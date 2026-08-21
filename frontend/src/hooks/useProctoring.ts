@@ -40,6 +40,7 @@ import {
   resetGazeTracking,
   type FaceMeshSignal,
 } from '../services/clientFaceMeshService';
+import { violationLabel } from '../utils/violationLabels';
 
 export interface ProctorStatus {
   isInitialized: boolean;
@@ -76,7 +77,7 @@ export interface ProctorConfig {
   faceDetectionInterval: number;
   snapshotInterval: number;
   onViolation?: (violation: ViolationData) => void;
-  onTerminate?: () => void;
+  onTerminate?: (reason: string) => void;
 }
 
 const defaultConfig: ProctorConfig = {
@@ -225,7 +226,7 @@ export function useProctoring(attemptId: string, config: Partial<ProctorConfig> 
     if (!session) return { success: false, shouldTerminate: false };
     const result = await reportViolation(session.sessionId, violation);
     if (result.shouldTerminate && finalConfig.onTerminate) {
-      finalConfig.onTerminate();
+      finalConfig.onTerminate(`Maximum proctoring violations reached (last: ${violationLabel(violation.eventType)})`);
     }
     return result;
   }, [session, finalConfig]);
@@ -1163,7 +1164,12 @@ export function useProctoring(attemptId: string, config: Partial<ProctorConfig> 
       }
 
       if (analysisResult.shouldTerminate && finalConfig.onTerminate) {
-        finalConfig.onTerminate();
+        const lastViolation = analysisResult.violations?.[analysisResult.violations.length - 1];
+        finalConfig.onTerminate(
+          lastViolation
+            ? `Maximum proctoring violations reached (last: ${violationLabel(lastViolation.eventType)})`
+            : 'Maximum proctoring violations reached'
+        );
       }
     } finally {
       snapshotAnalysisInFlightRef.current = false;
