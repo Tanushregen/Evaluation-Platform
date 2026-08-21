@@ -738,7 +738,7 @@ export const candidateApi = {
   heartbeat: () =>
     api.post('/candidate/heartbeat'),
 
-  submitTest: (data: { autoSubmit?: boolean }) =>
+  submitTest: (data: { autoSubmit?: boolean; reason?: string }) =>
     api.post<SubmissionResult>('/candidate/test/submit', data),
 
   // Verification - Candidate
