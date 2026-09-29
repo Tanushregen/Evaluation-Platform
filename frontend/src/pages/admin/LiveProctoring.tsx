@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ChevronDown,
   Eye,
+  LayoutGrid,
   Mic,
   Monitor,
   Search,
@@ -11,7 +12,7 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
-import { RemoteTrack, RemoteTrackPublication, Room, RoomEvent, Track } from 'livekit-client';
+import { RemoteParticipant, RemoteTrack, RemoteTrackPublication, Room, RoomEvent, Track } from 'livekit-client';
 import { adminApi } from '../../services/api';
 
 interface LiveCandidate {
@@ -356,6 +357,138 @@ function LiveTile({
   );
 }
 
+function GridTile({
+  candidate,
+  isChatTarget,
+  onRoom,
+  onSelectChat,
+}: {
+  candidate: LiveCandidate;
+  isChatTarget: boolean;
+  onRoom: (room: Room | null) => void;
+  onSelectChat: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelectChat}
+      aria-pressed={isChatTarget}
+      title={`Message ${candidate.name}`}
+      style={{
+        position: 'relative',
+        display: 'block',
+        width: '100%',
+        aspectRatio: '16 / 10',
+        borderRadius: '12px',
+        overflow: 'hidden',
+        border: isChatTarget ? '2px solid #60A5FA' : '1px solid rgba(255,255,255,0.10)',
+        boxShadow: isChatTarget ? '0 0 0 3px rgba(96,165,250,0.25)' : 'none',
+        backgroundColor: '#0F172A',
+        padding: 0,
+        cursor: 'pointer',
+        textAlign: 'left',
+      }}
+    >
+      <CandidateVideo attemptId={candidate.attemptId} active onRoom={onRoom} />
+
+      <div
+        style={{
+          position: 'absolute',
+          top: '8px',
+          left: '8px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px',
+          padding: '3px 8px',
+          borderRadius: '6px',
+          backgroundColor: '#E11D48',
+          color: 'white',
+          fontSize: '10px',
+          fontWeight: 800,
+        }}
+      >
+        <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: 'white' }} />
+        LIVE
+      </div>
+
+      {candidate.warning && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '8px',
+            right: '8px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '3px 7px',
+            borderRadius: '6px',
+            backgroundColor: 'rgba(225,29,72,0.92)',
+            color: 'white',
+            fontSize: '10px',
+            fontWeight: 700,
+            maxWidth: '65%',
+          }}
+        >
+          <AlertTriangle size={11} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {candidate.warning}
+          </span>
+        </div>
+      )}
+
+      <div
+        style={{
+          position: 'absolute',
+          bottom: '8px',
+          left: '8px',
+          right: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+        }}
+      >
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '4px 8px',
+            borderRadius: '6px',
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            color: 'white',
+            fontSize: '11px',
+            fontWeight: 700,
+            maxWidth: '78%',
+            overflow: 'hidden',
+          }}
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {candidate.name}
+          </span>
+        </span>
+        {!candidate.microphoneEnabled && (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '22px',
+              height: '22px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              color: '#94A3B8',
+              flexShrink: 0,
+            }}
+          >
+            <Mic size={11} />
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
+
 export default function LiveProctoring() {
   const { testId } = useParams();
   const [liveCandidates, setLiveCandidates] = useState<LiveCandidate[]>([]);
@@ -366,16 +499,56 @@ export default function LiveProctoring() {
   const [testMenuOpen, setTestMenuOpen] = useState(false);
   const [viewerRoom, setViewerRoom] = useState<Room | null>(null);
   const [messageText, setMessageText] = useState('');
-  const [sentMessages, setSentMessages] = useState<{ id: string; text: string; at: number }[]>([]);
+  // Keyed by attemptId so closing and reopening the popup for the same candidate
+  // keeps their thread; history lives only for this page session (until refresh/nav away).
+  const [chatMessagesByAttempt, setChatMessagesByAttempt] = useState<
+    Record<string, { id: string; text: string; at: number; from: 'admin' | 'candidate' }[]>
+  >({});
+  const viewerAttemptIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    setSentMessages([]);
+    viewerAttemptIdRef.current = viewerCandidate?.attemptId;
     setMessageText('');
   }, [viewerCandidate?.attemptId]);
 
+  const chatMessages = (viewerCandidate?.attemptId && chatMessagesByAttempt[viewerCandidate.attemptId]) || [];
+
+  useEffect(() => {
+    if (!viewerRoom) return;
+
+    const handleCandidateData = (payload: Uint8Array, participant?: RemoteParticipant) => {
+      if (participant && !participant.identity?.startsWith('candidate:')) return;
+      const attemptId = viewerAttemptIdRef.current;
+      if (!attemptId) return;
+      try {
+        const decoded = JSON.parse(new TextDecoder().decode(payload));
+        if (decoded && decoded.type === 'candidate-message' && typeof decoded.text === 'string') {
+          const entry = {
+            id: typeof decoded.id === 'string' ? decoded.id : `${Date.now()}`,
+            text: decoded.text,
+            at: typeof decoded.at === 'number' ? decoded.at : Date.now(),
+            from: 'candidate' as const,
+          };
+          setChatMessagesByAttempt((prev) => ({
+            ...prev,
+            [attemptId]: [...(prev[attemptId] || []), entry],
+          }));
+        }
+      } catch {
+        // Ignore malformed candidate data packets.
+      }
+    };
+
+    viewerRoom.on(RoomEvent.DataReceived, handleCandidateData);
+    return () => {
+      viewerRoom.off(RoomEvent.DataReceived, handleCandidateData);
+    };
+  }, [viewerRoom]);
+
   const sendProctorMessage = () => {
     const text = messageText.trim();
-    if (!text || !viewerRoom) return;
+    const attemptId = viewerCandidate?.attemptId;
+    if (!text || !viewerRoom || !attemptId) return;
     const message = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       text,
@@ -387,8 +560,102 @@ export default function LiveProctoring() {
     void viewerRoom.localParticipant
       .publishData(payload, { reliable: true })
       .catch((error) => console.error('Failed to send proctor message:', error));
-    setSentMessages((prev) => [...prev, message]);
+    setChatMessagesByAttempt((prev) => ({
+      ...prev,
+      [attemptId]: [...(prev[attemptId] || []), { ...message, from: 'admin' }],
+    }));
     setMessageText('');
+  };
+
+  // Grid (Google Meet-style) live view: connects to every visible candidate's room
+  // at once, keyed maps below track each candidate's own room/connection so the
+  // sidebar can target whichever tile is selected while still using the shared
+  // chatMessagesByAttempt history above (same threads as the single-candidate popup).
+  const [gridViewOpen, setGridViewOpen] = useState(false);
+  const [gridChatAttemptId, setGridChatAttemptId] = useState<string | null>(null);
+  const [gridMessageText, setGridMessageText] = useState('');
+  const [gridConnected, setGridConnected] = useState<Record<string, boolean>>({});
+  const gridRoomsRef = useRef<Record<string, Room>>({});
+  const gridListenersRef = useRef<Record<string, () => void>>({});
+
+  useEffect(() => {
+    setGridMessageText('');
+  }, [gridChatAttemptId]);
+
+  useEffect(() => {
+    if (!gridViewOpen) {
+      setGridChatAttemptId(null);
+    }
+  }, [gridViewOpen]);
+
+  const handleGridTileRoom = (attemptId: string, room: Room | null) => {
+    if (room) {
+      gridRoomsRef.current[attemptId] = room;
+      setGridConnected((prev) => (prev[attemptId] ? prev : { ...prev, [attemptId]: true }));
+
+      if (!gridListenersRef.current[attemptId]) {
+        const handleCandidateData = (payload: Uint8Array, participant?: RemoteParticipant) => {
+          if (participant && !participant.identity?.startsWith('candidate:')) return;
+          try {
+            const decoded = JSON.parse(new TextDecoder().decode(payload));
+            if (decoded && decoded.type === 'candidate-message' && typeof decoded.text === 'string') {
+              const entry = {
+                id: typeof decoded.id === 'string' ? decoded.id : `${Date.now()}`,
+                text: decoded.text,
+                at: typeof decoded.at === 'number' ? decoded.at : Date.now(),
+                from: 'candidate' as const,
+              };
+              setChatMessagesByAttempt((prev) => ({
+                ...prev,
+                [attemptId]: [...(prev[attemptId] || []), entry],
+              }));
+            }
+          } catch {
+            // Ignore malformed candidate data packets.
+          }
+        };
+        room.on(RoomEvent.DataReceived, handleCandidateData);
+        gridListenersRef.current[attemptId] = () => room.off(RoomEvent.DataReceived, handleCandidateData);
+      }
+    } else {
+      gridListenersRef.current[attemptId]?.();
+      delete gridListenersRef.current[attemptId];
+      delete gridRoomsRef.current[attemptId];
+      setGridConnected((prev) => {
+        if (!(attemptId in prev)) return prev;
+        const next = { ...prev };
+        delete next[attemptId];
+        return next;
+      });
+    }
+  };
+
+  const gridChatMessages = (gridChatAttemptId && chatMessagesByAttempt[gridChatAttemptId]) || [];
+  const gridChatCandidate = gridChatAttemptId
+    ? liveCandidates.find((candidate) => candidate.attemptId === gridChatAttemptId) || null
+    : null;
+
+  const sendGridMessage = () => {
+    const text = gridMessageText.trim();
+    const attemptId = gridChatAttemptId;
+    const room = attemptId ? gridRoomsRef.current[attemptId] : null;
+    if (!text || !room || !attemptId) return;
+    const message = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      text,
+      at: Date.now(),
+    };
+    const payload = new TextEncoder().encode(
+      JSON.stringify({ type: 'admin-message', ...message })
+    );
+    void room.localParticipant
+      .publishData(payload, { reliable: true })
+      .catch((error) => console.error('Failed to send proctor message:', error));
+    setChatMessagesByAttempt((prev) => ({
+      ...prev,
+      [attemptId]: [...(prev[attemptId] || []), { ...message, from: 'admin' }],
+    }));
+    setGridMessageText('');
   };
 
   useEffect(() => {
@@ -506,6 +773,18 @@ export default function LiveProctoring() {
           >
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#34D399' }} />
             {liveCount} live
+          </button>
+          <button
+            type="button"
+            className="admin-btn admin-btn-secondary"
+            title="Open grid view"
+            onClick={() => {
+              setViewerCandidate(null);
+              setGridViewOpen(true);
+            }}
+          >
+            <LayoutGrid size={15} />
+            Grid view
           </button>
           <div style={{ position: 'relative' }}>
             <button
@@ -680,6 +959,7 @@ export default function LiveProctoring() {
               selected={Boolean(candidate.attemptId && selectedAttemptId === candidate.attemptId)}
               onSelect={() => {
                 if (!candidate.attemptId) return;
+                setGridViewOpen(false);
                 setSelectedAttemptId(candidate.attemptId);
                 setViewerCandidate(candidate);
               }}
@@ -851,7 +1131,7 @@ export default function LiveProctoring() {
                 Message candidate
               </p>
 
-              {sentMessages.length > 0 && (
+              {chatMessages.length > 0 && (
                 <div
                   style={{
                     display: 'flex',
@@ -861,14 +1141,14 @@ export default function LiveProctoring() {
                     overflowY: 'auto',
                   }}
                 >
-                  {sentMessages.map((message) => (
+                  {chatMessages.map((message) => (
                     <div
                       key={message.id}
                       style={{
-                        alignSelf: 'flex-end',
+                        alignSelf: message.from === 'admin' ? 'flex-end' : 'flex-start',
                         maxWidth: '80%',
-                        backgroundColor: 'var(--admin-accent)',
-                        color: 'white',
+                        backgroundColor: message.from === 'admin' ? 'var(--admin-accent)' : '#F1F5F9',
+                        color: message.from === 'admin' ? 'white' : 'var(--admin-text)',
                         padding: '7px 11px',
                         borderRadius: '10px',
                         fontSize: '13px',
@@ -919,6 +1199,283 @@ export default function LiveProctoring() {
                   style={{ opacity: !viewerRoom || !messageText.trim() ? 0.6 : 1, flexShrink: 0 }}
                 >
                   <Send size={14} />
+                  Send
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {gridViewOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Grid live proctoring view"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            backgroundColor: '#0B1120',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div
+            style={{
+              height: '56px',
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              padding: '0 18px',
+              borderBottom: '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+              <LayoutGrid size={18} color="white" />
+              <p style={{ margin: 0, color: 'white', fontSize: '14px', fontWeight: 800 }}>
+                Grid view
+              </p>
+              <span
+                style={{
+                  padding: '2px 8px',
+                  borderRadius: '999px',
+                  backgroundColor: 'rgba(255,255,255,0.10)',
+                  color: '#CBD5E1',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                }}
+              >
+                {visibleCandidates.filter((candidate) => candidate.attemptId).length} candidates
+              </span>
+            </div>
+            <button
+              type="button"
+              title="Close grid view"
+              aria-label="Close grid view"
+              onClick={() => setGridViewOpen(false)}
+              style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '9px',
+                border: '1px solid rgba(255,255,255,0.12)',
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <X size={17} />
+            </button>
+          </div>
+
+          <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+            <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '16px' }}>
+              {visibleCandidates.filter((candidate) => candidate.attemptId).length > 0 ? (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+                    gap: '12px',
+                  }}
+                >
+                  {visibleCandidates
+                    .filter((candidate): candidate is LiveCandidate & { attemptId: string } => Boolean(candidate.attemptId))
+                    .map((candidate) => (
+                      <GridTile
+                        key={candidate.attemptId}
+                        candidate={candidate}
+                        isChatTarget={gridChatAttemptId === candidate.attemptId}
+                        onRoom={(room) => handleGridTileRoom(candidate.attemptId, room)}
+                        onSelectChat={() => setGridChatAttemptId(candidate.attemptId)}
+                      />
+                    ))}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#94A3B8',
+                    fontSize: '13px',
+                  }}
+                >
+                  No live candidates to display.
+                </div>
+              )}
+            </div>
+
+            <div
+              style={{
+                width: '320px',
+                flexShrink: 0,
+                borderLeft: '1px solid rgba(255,255,255,0.08)',
+                backgroundColor: '#0F172A',
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+              }}
+            >
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    color: '#64748B',
+                  }}
+                >
+                  Message candidate
+                </p>
+                {gridChatCandidate ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                    <div
+                      style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '50%',
+                        backgroundColor: '#2563EB',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '11px',
+                        fontWeight: 800,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {gridChatCandidate.initials}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <p
+                        style={{
+                          margin: 0,
+                          color: 'white',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {gridChatCandidate.name}
+                      </p>
+                      <p style={{ margin: 0, color: '#64748B', fontSize: '11px' }}>
+                        {gridChatAttemptId && gridConnected[gridChatAttemptId] ? 'Connected' : 'Connecting...'}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ margin: '8px 0 0', color: '#64748B', fontSize: '12px' }}>
+                    Select a candidate tile to start messaging.
+                  </p>
+                )}
+              </div>
+
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  padding: '12px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                {gridChatMessages.length === 0 ? (
+                  gridChatCandidate && (
+                    <p style={{ margin: 0, color: '#475569', fontSize: '12px' }}>
+                      No messages yet with this candidate.
+                    </p>
+                  )
+                ) : (
+                  gridChatMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      style={{
+                        alignSelf: message.from === 'admin' ? 'flex-end' : 'flex-start',
+                        maxWidth: '85%',
+                        backgroundColor: message.from === 'admin' ? '#2563EB' : 'rgba(255,255,255,0.08)',
+                        color: 'white',
+                        padding: '7px 11px',
+                        borderRadius: '10px',
+                        fontSize: '13px',
+                        lineHeight: 1.35,
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {message.text}
+                      <span style={{ display: 'block', fontSize: '10px', opacity: 0.7, marginTop: '3px' }}>
+                        {new Date(message.at).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  sendGridMessage();
+                }}
+                style={{
+                  display: 'flex',
+                  gap: '8px',
+                  padding: '12px 16px',
+                  borderTop: '1px solid rgba(255,255,255,0.08)',
+                  flexShrink: 0,
+                }}
+              >
+                <input
+                  value={gridMessageText}
+                  onChange={(event) => setGridMessageText(event.target.value)}
+                  placeholder={gridChatCandidate ? 'Type a message...' : 'Select a candidate first'}
+                  disabled={!gridChatAttemptId || !gridConnected[gridChatAttemptId]}
+                  aria-label="Message to candidate"
+                  maxLength={500}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    height: '36px',
+                    borderRadius: '9px',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    padding: '0 11px',
+                    fontSize: '13px',
+                    color: 'white',
+                    backgroundColor: 'rgba(255,255,255,0.06)',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={!gridChatAttemptId || !gridConnected[gridChatAttemptId] || !gridMessageText.trim()}
+                  style={{
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '0 12px',
+                    height: '36px',
+                    borderRadius: '9px',
+                    border: 'none',
+                    backgroundColor: '#2563EB',
+                    color: 'white',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    opacity:
+                      !gridChatAttemptId || !gridConnected[gridChatAttemptId] || !gridMessageText.trim() ? 0.5 : 1,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Send size={13} />
                   Send
                 </button>
               </form>
