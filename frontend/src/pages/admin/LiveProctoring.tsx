@@ -7,6 +7,7 @@ import {
   LayoutGrid,
   Mic,
   Monitor,
+  Pin,
   Search,
   Send,
   ShieldCheck,
@@ -359,12 +360,12 @@ function LiveTile({
 
 function GridTile({
   candidate,
-  isChatTarget,
+  isSelected,
   onRoom,
   onSelectChat,
 }: {
   candidate: LiveCandidate;
-  isChatTarget: boolean;
+  isSelected: boolean;
   onRoom: (room: Room | null) => void;
   onSelectChat: () => void;
 }) {
@@ -372,8 +373,8 @@ function GridTile({
     <button
       type="button"
       onClick={onSelectChat}
-      aria-pressed={isChatTarget}
-      title={`Message ${candidate.name}`}
+      aria-pressed={isSelected}
+      title={`View ${candidate.name} in main stage`}
       style={{
         position: 'relative',
         display: 'block',
@@ -381,15 +382,65 @@ function GridTile({
         aspectRatio: '16 / 10',
         borderRadius: '12px',
         overflow: 'hidden',
-        border: isChatTarget ? '2px solid #60A5FA' : '1px solid rgba(255,255,255,0.10)',
-        boxShadow: isChatTarget ? '0 0 0 3px rgba(96,165,250,0.25)' : 'none',
+        border: isSelected ? '2px solid #60A5FA' : '1px solid rgba(255,255,255,0.10)',
+        boxShadow: isSelected ? '0 0 0 3px rgba(96,165,250,0.25)' : 'none',
         backgroundColor: '#0F172A',
         padding: 0,
         cursor: 'pointer',
         textAlign: 'left',
+        flexShrink: 0,
       }}
     >
-      <CandidateVideo attemptId={candidate.attemptId} active onRoom={onRoom} />
+      {isSelected ? (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(145deg, #101827 0%, #17243A 100%)',
+          }}
+        >
+          <div
+            style={{
+              width: '52px',
+              height: '52px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255,255,255,0.10)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              fontSize: '12px',
+              fontWeight: 800,
+            }}
+          >
+            {candidate.initials}
+          </div>
+          <span
+            style={{
+              position: 'absolute',
+              top: '8px',
+              right: '8px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '22px',
+              height: '22px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(96,165,250,0.85)',
+              color: 'white',
+            }}
+            title="Showing in main stage"
+          >
+            <Pin size={11} />
+          </span>
+        </div>
+      ) : (
+        <CandidateVideo attemptId={candidate.attemptId} active onRoom={onRoom} />
+      )}
 
       <div
         style={{
@@ -486,6 +537,119 @@ function GridTile({
         )}
       </div>
     </button>
+  );
+}
+
+// Main stage: the big center preview of whichever tile is selected in the
+// participants strip, Google Meet-style. Renders the only live connection for
+// that candidate (the strip tile shows an avatar placeholder while selected)
+// so we never open two viewer connections for the same attemptId at once.
+function MainStage({
+  candidate,
+  onRoom,
+}: {
+  candidate: LiveCandidate | null;
+  onRoom: (room: Room | null) => void;
+}) {
+  if (!candidate?.attemptId) {
+    return (
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          borderRadius: '14px',
+          border: '1px dashed rgba(255,255,255,0.14)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#64748B',
+          fontSize: '13px',
+        }}
+      >
+        Select a candidate to view their live feed.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        borderRadius: '14px',
+        overflow: 'hidden',
+        border: '1px solid rgba(96,165,250,0.35)',
+        backgroundColor: '#0F172A',
+      }}
+    >
+      <CandidateVideo attemptId={candidate.attemptId} active onRoom={onRoom} />
+
+      <div
+        style={{
+          position: 'absolute',
+          top: '14px',
+          left: '14px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '7px',
+          padding: '6px 11px',
+          borderRadius: '8px',
+          backgroundColor: '#E11D48',
+          color: 'white',
+          fontSize: '11px',
+          fontWeight: 800,
+        }}
+      >
+        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'white' }} />
+        LIVE
+      </div>
+
+      {candidate.warning && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '14px',
+            right: '14px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 11px',
+            borderRadius: '8px',
+            backgroundColor: 'rgba(225,29,72,0.92)',
+            color: 'white',
+            fontSize: '12px',
+            fontWeight: 700,
+            maxWidth: '60%',
+          }}
+        >
+          <AlertTriangle size={13} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {candidate.warning}
+          </span>
+        </div>
+      )}
+
+      <div
+        style={{
+          position: 'absolute',
+          bottom: '14px',
+          left: '14px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '7px 12px',
+          borderRadius: '8px',
+          backgroundColor: 'rgba(0,0,0,0.55)',
+          color: 'white',
+          fontSize: '13px',
+          fontWeight: 700,
+        }}
+      >
+        {candidate.name}
+        {!candidate.microphoneEnabled && <Mic size={13} color="#94A3B8" />}
+      </div>
+    </div>
   );
 }
 
@@ -732,6 +896,19 @@ export default function LiveProctoring() {
     return `${candidate.name} ${candidate.role}`.toLowerCase().includes(term);
   });
   const liveCount = liveCandidates.filter(candidate => candidate.online !== false).length;
+
+  // Default the main stage to the first available candidate when the grid opens
+  // (or when the previously-pinned one drops out of the visible list), so the
+  // center panel never sits empty while candidates are on screen.
+  useEffect(() => {
+    if (!gridViewOpen) return;
+    setGridChatAttemptId((current) => {
+      if (current && visibleCandidates.some((candidate) => candidate.attemptId === current)) {
+        return current;
+      }
+      return visibleCandidates.find((candidate) => candidate.attemptId)?.attemptId || null;
+    });
+  }, [gridViewOpen, visibleCandidates]);
 
   return (
     <div style={{ backgroundColor: '#F9FAFB', minHeight: '100%' }}>
@@ -1273,41 +1450,53 @@ export default function LiveProctoring() {
           </div>
 
           <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-            <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '16px' }}>
+            {/* Participants strip — click a tile to pin it in the main stage */}
+            <div
+              style={{
+                width: '220px',
+                flexShrink: 0,
+                overflowY: 'auto',
+                padding: '16px 12px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+                borderRight: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
               {visibleCandidates.filter((candidate) => candidate.attemptId).length > 0 ? (
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-                    gap: '12px',
-                  }}
-                >
-                  {visibleCandidates
-                    .filter((candidate): candidate is LiveCandidate & { attemptId: string } => Boolean(candidate.attemptId))
-                    .map((candidate) => (
-                      <GridTile
-                        key={candidate.attemptId}
-                        candidate={candidate}
-                        isChatTarget={gridChatAttemptId === candidate.attemptId}
-                        onRoom={(room) => handleGridTileRoom(candidate.attemptId, room)}
-                        onSelectChat={() => setGridChatAttemptId(candidate.attemptId)}
-                      />
-                    ))}
-                </div>
+                visibleCandidates
+                  .filter((candidate): candidate is LiveCandidate & { attemptId: string } => Boolean(candidate.attemptId))
+                  .map((candidate) => (
+                    <GridTile
+                      key={candidate.attemptId}
+                      candidate={candidate}
+                      isSelected={gridChatAttemptId === candidate.attemptId}
+                      onRoom={(room) => handleGridTileRoom(candidate.attemptId, room)}
+                      onSelectChat={() => setGridChatAttemptId(candidate.attemptId)}
+                    />
+                  ))
               ) : (
                 <div
                   style={{
-                    height: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#94A3B8',
-                    fontSize: '13px',
+                    padding: '24px 4px',
+                    textAlign: 'center',
+                    color: '#64748B',
+                    fontSize: '12px',
                   }}
                 >
                   No live candidates to display.
                 </div>
               )}
+            </div>
+
+            {/* Main stage — big picture of the pinned/selected candidate */}
+            <div style={{ flex: 1, minWidth: 0, padding: '16px', display: 'flex' }}>
+              <MainStage
+                candidate={gridChatCandidate}
+                onRoom={(room) => {
+                  if (gridChatAttemptId) handleGridTileRoom(gridChatAttemptId, room);
+                }}
+              />
             </div>
 
             <div
