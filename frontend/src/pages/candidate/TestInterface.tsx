@@ -110,6 +110,10 @@ export default function TestInterface() {
   const [policyPauseReason, setPolicyPauseReason] = useState('');
   const [proctorMessages, setProctorMessages] = useState<{ id: string; text: string; at: number; from: 'admin' | 'candidate' }[]>([]);
   const [proctorChatOpen, setProctorChatOpen] = useState(false);
+  // A new admin message shows as a brief single-message toast (not the full
+  // thread) so it doesn't look like the whole chat panel popped open; opening
+  // the panel is only ever a deliberate click on the bubble/toast.
+  const [proctorToastMessage, setProctorToastMessage] = useState<{ id: string; text: string; at: number } | null>(null);
   const [proctorReplyText, setProctorReplyText] = useState('');
   // New state for redesigned UI
   const [markedForReview, setMarkedForReview] = useState<Set<number>>(new Set());
@@ -267,7 +271,11 @@ export default function TestInterface() {
     screenStream,
     onAdminMessage: (message) => {
       setProctorMessages((prev) => [...prev, { ...message, from: 'admin' }]);
-      setProctorChatOpen(true);
+      // Only surface the brief toast if the candidate isn't already looking at
+      // the full panel -- there it's already visible in the thread.
+      if (!proctorChatOpen) {
+        setProctorToastMessage(message);
+      }
     },
   });
 
@@ -281,6 +289,18 @@ export default function TestInterface() {
     ]);
     setProctorReplyText('');
   };
+
+  const openProctorChat = () => {
+    setProctorToastMessage(null);
+    setProctorChatOpen(true);
+  };
+
+  // Auto-dismiss the single-message toast back to the plain bubble icon.
+  useEffect(() => {
+    if (!proctorToastMessage) return;
+    const timer = setTimeout(() => setProctorToastMessage(null), 6000);
+    return () => clearTimeout(timer);
+  }, [proctorToastMessage]);
 
   // Auto-collapse the chat panel so it doesn't stay parked on screen, but not
   // while the candidate is mid-reply -- restarts whenever a new message arrives.
@@ -1105,10 +1125,11 @@ export default function TestInterface() {
         </div>
       )}
 
-      {/* Proctor chat: collapses to an icon-only bubble; a new admin message
-          pops the full panel open and it auto-collapses back to the bubble
-          after 6s idle (see the effect above). Replying is only reachable
-          through the open panel, i.e. after the candidate taps the bubble. */}
+      {/* Proctor chat: collapses to an icon-only bubble. A new admin message
+          shows only that single message as a brief toast (not the whole
+          thread/panel) and auto-dismisses back to the bubble after 6s.
+          Replying is only reachable by tapping the bubble/toast to open the
+          full panel, which itself auto-collapses after 6s idle. */}
       {proctorMessages.length > 0 && (
         <div className="fixed top-16 right-4 z-50">
           {proctorChatOpen ? (
@@ -1162,10 +1183,27 @@ export default function TestInterface() {
                 </button>
               </form>
             </div>
+          ) : proctorToastMessage ? (
+            <button
+              type="button"
+              onClick={openProctorChat}
+              aria-label="Open message from invigilator"
+              className="flex max-w-xs items-start gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-left text-white shadow-2xl ring-1 ring-black/10 hover:bg-indigo-700"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8-1.06 0-2.076-.163-3.02-.465L3 21l1.395-4.185A7.946 7.946 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              <span className="min-w-0">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-indigo-200">
+                  Message from Invigilator
+                </span>
+                <span className="block truncate text-sm font-medium">{proctorToastMessage.text}</span>
+              </span>
+            </button>
           ) : (
             <button
               type="button"
-              onClick={() => setProctorChatOpen(true)}
+              onClick={openProctorChat}
               aria-label="Open message from invigilator"
               title="Message from invigilator"
               className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-2xl ring-1 ring-black/10 transition-transform hover:scale-105 hover:bg-indigo-700"
