@@ -7,8 +7,9 @@ import {
   cancelAdminDeletion,
   ForeignReferenceError,
 } from '../services/softDelete.js';
-import { generateAdminImpersonationToken } from '../utils/jwt.js';
+import { generateAdminImpersonationToken, IMPERSONATION_TOKEN_EXPIRY_MINUTES } from '../utils/jwt.js';
 import { createAuditLogEntry } from '../services/auditChain.js';
+import { getAdminDeviceSummary, getDeviceCountsForAdmins } from '../services/deviceSessions.js';
 
 const ONLINE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -28,6 +29,7 @@ export async function fetchAdminAccounts() {
     _count: { _all: true },
   });
   const latestByAdmin = new Map(latestActions.map((row) => [row.adminId, row]));
+  const deviceCounts = await getDeviceCountsForAdmins(admins.map((a) => a.id));
 
   const now = Date.now();
   return admins.map((admin) => {
@@ -43,6 +45,7 @@ export async function fetchAdminAccounts() {
       createdAt: admin.createdAt,
       lastActiveAt,
       status: isOnline ? 'online' : 'offline',
+      deviceCount: deviceCounts.get(admin.id) ?? 0,
       actionsRecorded: latest?._count._all ?? 0,
       ownedContent: {
         tests: admin._count.tests,
@@ -64,6 +67,23 @@ export async function listAdminAccounts(_req: AuthenticatedRequest, res: Respons
     res.json({ admins });
   } catch (error) {
     console.error('List admin accounts error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+export async function getAdminDevices(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const { adminId } = req.params;
+    const admin = await prisma.admin.findUnique({ where: { id: adminId }, select: { id: true } });
+    if (!admin) {
+      res.status(404).json({ error: 'Admin not found' });
+      return;
+    }
+
+    const summary = await getAdminDeviceSummary(adminId);
+    res.json(summary);
+  } catch (error) {
+    console.error('Get admin devices error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 }
@@ -123,10 +143,12 @@ export async function cancelDeleteAdminAccount(req: AuthenticatedRequest, res: R
   }
 }
 
-// Mints a 15-minute admin token so the superadmin can see exactly what an
-// admin sees, for debugging. Loudly audit-logged — this is the one action
-// in the whole console that lets a superadmin act with an admin's own
-// identity, so it gets the most visible possible trail.
+// Mints a short-lived (2-minute) admin token so the superadmin can see
+// exactly what an admin sees, for debugging. Loudly audit-logged — this is
+// the one action in the whole console that lets a superadmin act with an
+// admin's own identity, so it gets the most visible possible trail. The main
+// app itself shows a countdown banner and force-logs-out the impersonated
+// session the moment the token expires (see ImpersonationBanner.tsx).
 export async function impersonateAdmin(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { adminId } = req.params;
@@ -149,10 +171,10 @@ export async function impersonateAdmin(req: AuthenticatedRequest, res: Response)
       action: 'create',
       resourceType: 'AdminImpersonation',
       resourceId: adminId,
-      after: { targetEmail: admin.email, expiresInMinutes: 15 },
+      after: { targetEmail: admin.email, expiresInMinutes: IMPERSONATION_TOKEN_EXPIRY_MINUTES },
     });
 
-    res.json({ token, adminEmail: admin.email, expiresInMinutes: 15 });
+    res.json({ token, adminEmail: admin.email, expiresInMinutes: IMPERSONATION_TOKEN_EXPIRY_MINUTES });
   } catch (error) {
     console.error('Impersonate admin error:', error);
     res.status(500).json({ error: 'Internal server error' });

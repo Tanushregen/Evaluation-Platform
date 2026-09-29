@@ -56,6 +56,7 @@ export interface AdminAccountSummary {
   createdAt: string;
   lastActiveAt: string | null;
   status: 'online' | 'offline';
+  deviceCount: number;
   actionsRecorded: number;
   ownedContent: {
     tests: number;
@@ -67,6 +68,17 @@ export interface AdminAccountSummary {
   securityLockReason: string | null;
   pendingDeletionAt: string | null;
   deletionReason: string | null;
+}
+
+export interface AdminDeviceInfo {
+  key: string;
+  browser: string;
+  os: string;
+  ipAddress: string | null;
+  location: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  loginCount: number;
 }
 
 export interface AdminActionLogEntry {
@@ -140,6 +152,36 @@ export interface LiveTelemetry {
   failedRequestRatePct: number | null;
   sampleCounts: Record<string, number>;
   disclaimer: string;
+}
+
+export interface HostResources {
+  cpuLoadPct: number | null;
+  cpuCores: number;
+  memTotalBytes: number;
+  memUsedBytes: number;
+  memUsedPct: number;
+  diskTotalBytes: number | null;
+  diskUsedBytes: number | null;
+  diskUsedPct: number | null;
+  uptimeSec: number;
+}
+
+export interface ProcessResource {
+  name: string;
+  pmId: number;
+  status: string;
+  cpuPct: number;
+  memBytes: number;
+  uptimeMs: number | null;
+  restarts: number;
+}
+
+export interface LiveResources {
+  capturedAt: string;
+  host: HostResources;
+  processes: ProcessResource[] | null;
+  dbPool: { activeConnections: number } | null;
+  backlog: { pendingAdminDeletions: number };
 }
 
 export interface TelemetrySnapshotEntry {
@@ -394,8 +436,12 @@ export const superAdminApi = {
     superAdminHttp.post<{ token: string; adminEmail: string; expiresInMinutes: number }>(
       `/superadmin/accounts/${adminId}/impersonate`
     ),
+  getAdminDevices: (adminId: string) =>
+    superAdminHttp.get<{ count: number; devices: AdminDeviceInfo[] }>(`/superadmin/accounts/${adminId}/devices`),
   forceLogoutAdmin: (adminId: string) =>
     superAdminHttp.post<{ message: string }>(`/superadmin/accounts/${adminId}/force-logout`),
+  lockAdminSecurity: (adminId: string) =>
+    superAdminHttp.post<{ message: string }>(`/superadmin/accounts/${adminId}/lock`),
   unlockAdminSecurity: (adminId: string) =>
     superAdminHttp.post<{ message: string }>(`/superadmin/accounts/${adminId}/unlock`),
 
@@ -431,6 +477,7 @@ export const superAdminApi = {
     superAdminHttp.get<{ snapshots: TelemetrySnapshotEntry[] }>('/superadmin/telemetry/history', {
       params: { limit },
     }),
+  getLiveResources: () => superAdminHttp.get<LiveResources>('/superadmin/resources/live'),
 
   chatWithAssistant: (message: string, history: AssistantChatMessage[]) =>
     superAdminHttp.post<{ reply: string; toolsUsed: string[] }>('/superadmin/ai/chat', { message, history }),

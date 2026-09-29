@@ -21,7 +21,7 @@ import superadminRoutes from './routes/superadmin.js';
 import { setSocketServer } from './services/socketService.js';
 import { adminActionLogger } from './middleware/adminActionLogger.js';
 import { verifyToken } from './utils/jwt.js';
-import { SUPERADMIN_ROOM, emitToSuperAdminRoom } from './services/socketService.js';
+import { SUPERADMIN_ROOM, emitToSuperAdminRoom, isSuperAdminRoomActive } from './services/socketService.js';
 import { recordPingSample, recordAppFpsSample, getLiveTelemetrySnapshot } from './services/telemetryRingBuffer.js';
 import prisma from './utils/db.js';
 import { ensureNotificationTable } from './controllers/notifications.js';
@@ -32,6 +32,7 @@ import { ensureDefaultBillingPlans } from './services/billing.js';
 import { checkTelemetryThresholds } from './services/telemetryAlerting.js';
 import { runAnomalyDetection } from './services/anomalyLock.js';
 import { runScheduledDeletions } from './services/softDelete.js';
+import { getLiveResourcesSnapshot } from './services/systemResourcesService.js';
 import { liveKitEgressWebhook } from './controllers/egressRecording.js';
 
 function applyEnvFile(envPath: string): boolean {
@@ -142,7 +143,15 @@ function isOriginAllowed(origin: string | undefined): boolean {
 }
 
 const app = express();
-app.set('trust proxy', 1);
+// Two reverse-proxy hops sit between the internet and this process on the
+// production/experiment droplet: Caddy (public :443, terminates TLS) then
+// nginx (127.0.0.1:8443, does the actual /api, /socket.io, / routing) before
+// reaching this app on :3000. Both correctly forward X-Forwarded-For, but
+// trusting only 1 hop here made req.ip resolve to nginx's own loopback
+// address instead of walking back the extra hop to the real client IP --
+// the actual bug behind every login recording 127.0.0.1 (see AuthSession /
+// services/deviceSessions.ts, which relies on req.ip being correct).
+app.set('trust proxy', 2);
 const httpServer = createServer(app);
 const io = new SocketServer(httpServer, {
   cors: {
@@ -481,11 +490,17 @@ async function snapshotTelemetry(): Promise<void> {
   }
 }
 
-const TELEMETRY_TICK_INTERVAL_MS = 3_000;
+// 2s, matching PM2's own dashboard heartbeat cadence — the Telemetry screen's
+// KPI tiles should feel as "live" to an admin watching it as PM2's process
+// list does.
+const TELEMETRY_TICK_INTERVAL_MS = 2_000;
 async function tickLiveTelemetry(): Promise<void> {
   try {
     const activeSessions = await prisma.proctorSession.count({ where: { endedAt: null } });
     const snapshot = getLiveTelemetrySnapshot();
+    // Always emitted (socket.io's emit to an empty room is a no-op) — unlike
+    // the resources tick below, this one also drives checkTelemetryThresholds,
+    // which must keep running whether or not an admin tab is open to watch it.
     emitToSuperAdminRoom('telemetry-tick', {
       capturedAt: new Date().toISOString(),
       activeSessions,
@@ -494,6 +509,23 @@ async function tickLiveTelemetry(): Promise<void> {
     void checkTelemetryThresholds(snapshot.apiLatencyP95Ms);
   } catch (error) {
     console.error('Telemetry tick failed:', error);
+  }
+}
+
+// Host/process/DB resource numbers — on its own timer from the telemetry tick
+// above (getProcessResources() shells out to `pm2 jlist` and getDbPoolResources()
+// hits Postgres, both real I/O rather than an in-memory read) but the same 2s
+// cadence, so every section of the screen refreshes together. Skipped entirely
+// while no superadmin tab is connected, since a `pm2 jlist` subprocess spawn
+// every 2s forever is real, avoidable cost on an idle dashboard.
+const RESOURCES_TICK_INTERVAL_MS = 2_000;
+async function tickLiveResources(): Promise<void> {
+  if (!isSuperAdminRoomActive()) return;
+  try {
+    const snapshot = await getLiveResourcesSnapshot();
+    emitToSuperAdminRoom('resources-tick', snapshot);
+  } catch (error) {
+    console.error('Resources tick failed:', error);
   }
 }
 
@@ -615,6 +647,14 @@ async function startServer(): Promise<void> {
     await prisma.$executeRaw`CREATE UNIQUE INDEX IF NOT EXISTS "FeatureFlagOverride_featureKey_adminId_key" ON "FeatureFlagOverride"("featureKey", "adminId")`;
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "FeatureFlagOverride_adminId_idx" ON "FeatureFlagOverride"("adminId")`;
     console.log('Feature flag overrides table: ready');
+
+    // Superadmin Observer's per-account "devices logged in" view — cached
+    // IP-geolocation columns on AuthSession, resolved asynchronously after
+    // login (see services/deviceSessions.ts) rather than at row-creation time.
+    await prisma.$executeRaw`ALTER TABLE "AuthSession" ADD COLUMN IF NOT EXISTS "geoCity" TEXT`;
+    await prisma.$executeRaw`ALTER TABLE "AuthSession" ADD COLUMN IF NOT EXISTS "geoRegion" TEXT`;
+    await prisma.$executeRaw`ALTER TABLE "AuthSession" ADD COLUMN IF NOT EXISTS "geoCountry" TEXT`;
+    console.log('AuthSession geolocation columns: ready');
   } catch (error) {
     console.error('Database connectivity check failed. Verify PostgreSQL and DATABASE_URL.', error);
     process.exit(1);
@@ -628,6 +668,7 @@ async function startServer(): Promise<void> {
 
   setInterval(() => void snapshotTelemetry(), TELEMETRY_SNAPSHOT_INTERVAL_MS);
   setInterval(() => void tickLiveTelemetry(), TELEMETRY_TICK_INTERVAL_MS);
+  setInterval(() => void tickLiveResources(), RESOURCES_TICK_INTERVAL_MS);
   setInterval(() => void runAnomalyDetection(), ANOMALY_DETECTION_INTERVAL_MS);
   setInterval(() => void runScheduledDeletions(), SCHEDULED_DELETION_INTERVAL_MS);
 

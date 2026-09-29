@@ -9,6 +9,7 @@ import {
   scheduleDeleteAdminAccount,
   cancelDeleteAdminAccount,
   impersonateAdmin,
+  getAdminDevices,
 } from '../controllers/superAdminAccounts.js';
 import {
   listFeatureFlags,
@@ -27,6 +28,7 @@ import {
   getClickSessionReplay,
 } from '../controllers/superAdminAuditLog.js';
 import { getLiveTelemetry, getTelemetryHistory } from '../controllers/superAdminTelemetry.js';
+import { getLiveResources } from '../controllers/superAdminResources.js';
 import { chatWithAssistant } from '../controllers/superAdminAssistant.js';
 import { getOverviewTrends } from '../controllers/superAdminOverview.js';
 import {
@@ -59,6 +61,7 @@ import {
   listSuperAdmins,
   createSuperAdmin,
   deleteSuperAdmin,
+  lockAdminSecurity,
   unlockAdminSecurity,
 } from '../controllers/superAdminSecurity.js';
 import {
@@ -89,11 +92,13 @@ router.get('/profile', superAdminAuth, getSuperAdminProfile);
 
 // ---- Accounts ----
 router.get('/accounts', superAdminAuth, listAdminAccounts);
+router.get('/accounts/:adminId/devices', superAdminAuth, getAdminDevices);
 router.delete('/accounts/:adminId', superAdminAuth, requireFullControl, deleteAdminAccount);
 router.post('/accounts/:adminId/schedule-delete', superAdminAuth, requireFullControl, scheduleDeleteAdminAccount);
 router.post('/accounts/:adminId/cancel-delete', superAdminAuth, requireFullControl, cancelDeleteAdminAccount);
 router.post('/accounts/:adminId/impersonate', superAdminAuth, requireFullControl, impersonateAdmin);
 router.post('/accounts/:adminId/force-logout', superAdminAuth, requireFullControl, forceLogoutAdmin);
+router.post('/accounts/:adminId/lock', superAdminAuth, requireFullControl, lockAdminSecurity);
 router.post('/accounts/:adminId/unlock', superAdminAuth, requireFullControl, unlockAdminSecurity);
 
 // ---- Feature locks ----
@@ -115,6 +120,7 @@ router.get('/logs/clicks/sessions/:sessionId', superAdminAuth, getClickSessionRe
 // ---- Telemetry ----
 router.get('/telemetry/live', superAdminAuth, getLiveTelemetry);
 router.get('/telemetry/history', superAdminAuth, getTelemetryHistory);
+router.get('/resources/live', superAdminAuth, getLiveResources);
 
 // ---- Overview ----
 router.get('/overview/trends', superAdminAuth, getOverviewTrends);

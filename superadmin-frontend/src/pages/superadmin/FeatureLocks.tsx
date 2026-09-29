@@ -35,6 +35,7 @@ export default function SuperAdminFeatureLocks() {
   const [selectedAccountId, setSelectedAccountId] = useState<string>(GLOBAL_VIEW);
   const [accountFlags, setAccountFlags] = useState<AdminFeatureOverrideView[] | null>(null);
   const [pending, setPending] = useState<string | null>(null);
+  const [confirmingMaintenanceOn, setConfirmingMaintenanceOn] = useState(false);
 
   const loadGlobal = useCallback(async () => {
     try {
@@ -90,6 +91,25 @@ export default function SuperAdminFeatureLocks() {
     }
   };
 
+  // maintenance_mode uses enabled=true for "operating normally" (see
+  // statusLabel above), so turning it ON — the disruptive direction, which
+  // blocks every admin platform-wide — means flipping enabled to false.
+  // Only that direction gets a confirmation; switching it back off (restoring
+  // normal operation) is the safe direction and applies immediately.
+  const requestMaintenanceToggle = () => {
+    if (!maintenanceFlag) return;
+    if (maintenanceFlag.enabled) {
+      setConfirmingMaintenanceOn(true);
+    } else {
+      void toggleGlobal(maintenanceFlag);
+    }
+  };
+
+  const confirmMaintenanceOn = () => {
+    setConfirmingMaintenanceOn(false);
+    if (maintenanceFlag) void toggleGlobal(maintenanceFlag);
+  };
+
   const toggleAccountOverride = async (flag: AdminFeatureOverrideView) => {
     setPending(flag.key);
     try {
@@ -120,6 +140,11 @@ export default function SuperAdminFeatureLocks() {
   const isGlobalView = selectedAccountId === GLOBAL_VIEW;
   const maintenanceFlag = flags?.find((flag) => flag.key === MAINTENANCE_FLAG_KEY) ?? null;
   const maintenanceActive = maintenanceFlag !== null && !maintenanceFlag.enabled;
+  // maintenance_mode gets its own dedicated banner+toggle above (with clearer
+  // On/Off framing than a generic flag row) — excluded from both capability
+  // lists below so it isn't a duplicate control for the same setting.
+  const listedFlags = flags?.filter((flag) => flag.key !== MAINTENANCE_FLAG_KEY) ?? null;
+  const listedAccountFlags = accountFlags?.filter((flag) => flag.key !== MAINTENANCE_FLAG_KEY) ?? null;
 
   return (
     <div>
@@ -149,10 +174,39 @@ export default function SuperAdminFeatureLocks() {
           </div>
           <Toggle
             on={maintenanceFlag.enabled}
-            onClick={() => toggleGlobal(maintenanceFlag)}
+            onClick={requestMaintenanceToggle}
             disabled={pending === maintenanceFlag.key}
             label="Toggle maintenance mode"
           />
+        </div>
+      )}
+
+      {confirmingMaintenanceOn && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="relative w-full max-w-md bg-sa-panel-raised border border-sa-critical/40 rounded-xl p-6 shadow-2xl">
+            <div className="flex items-center gap-2.5 mb-2">
+              <AlertTriangle size={18} className="text-sa-critical shrink-0" />
+              <h2 className="text-sm font-semibold text-sa-critical">Enable maintenance mode?</h2>
+            </div>
+            <p className="text-[13px] text-sa-ink-dim mb-5">
+              This will stop all admin console logins and actions platform-wide, immediately, for every admin. Candidates
+              already taking a test are never affected. Are you sure?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmingMaintenanceOn(false)}
+                className="text-[12.5px] px-3.5 py-2 rounded-lg border border-sa-line text-sa-ink-dim hover:text-sa-ink hover:border-sa-line-bright transition-all"
+              >
+                No, cancel
+              </button>
+              <button
+                onClick={confirmMaintenanceOn}
+                className="text-[12.5px] px-3.5 py-2 rounded-lg bg-sa-critical text-white font-semibold hover:brightness-110 transition-all"
+              >
+                Yes, enable it
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -173,9 +227,9 @@ export default function SuperAdminFeatureLocks() {
       </div>
 
       {isGlobalView ? (
-        <Card title="Platform-wide capabilities" meta={flags ? `${flags.length} features` : undefined}>
+        <Card title="Platform-wide capabilities" meta={listedFlags ? `${listedFlags.length} features` : undefined}>
           <div>
-            {flags?.map((flag) => (
+            {listedFlags?.map((flag) => (
               <div key={flag.key} className="flex items-center gap-3.5 py-3.5 border-b border-sa-line-soft last:border-0">
                 <div
                   className={`shrink-0 h-8 w-8 rounded-lg border flex items-center justify-center ${
@@ -200,17 +254,17 @@ export default function SuperAdminFeatureLocks() {
                 <Toggle on={flag.enabled} onClick={() => toggleGlobal(flag)} disabled={pending === flag.key} label={`Toggle ${flag.label}`} />
               </div>
             ))}
-            {flags?.length === 0 && <EmptyState>No feature flags configured.</EmptyState>}
-            {flags === null && <EmptyState>Loading…</EmptyState>}
+            {listedFlags?.length === 0 && <EmptyState>No feature flags configured.</EmptyState>}
+            {listedFlags === null && <EmptyState>Loading…</EmptyState>}
           </div>
         </Card>
       ) : (
         <Card
           title={`Overrides for ${selectedAccount?.name || selectedAccount?.email || 'account'}`}
-          meta={accountFlags ? `${accountFlags.length} features` : undefined}
+          meta={listedAccountFlags ? `${listedAccountFlags.length} features` : undefined}
         >
           <div>
-            {accountFlags?.map((flag) => (
+            {listedAccountFlags?.map((flag) => (
               <div key={flag.key} className="flex items-center gap-3.5 py-3.5 border-b border-sa-line-soft last:border-0">
                 <div
                   className={`shrink-0 h-8 w-8 rounded-lg border flex items-center justify-center ${
@@ -256,8 +310,8 @@ export default function SuperAdminFeatureLocks() {
                 />
               </div>
             ))}
-            {accountFlags?.length === 0 && <EmptyState>No feature flags configured.</EmptyState>}
-            {accountFlags === null && <EmptyState>Loading…</EmptyState>}
+            {listedAccountFlags?.length === 0 && <EmptyState>No feature flags configured.</EmptyState>}
+            {listedAccountFlags === null && <EmptyState>Loading…</EmptyState>}
           </div>
         </Card>
       )}

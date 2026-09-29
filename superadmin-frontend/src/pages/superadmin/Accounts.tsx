@@ -1,13 +1,35 @@
 import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { Trash2, Eye, LogOut, Unlock, XCircle, Clock } from 'lucide-react';
+import { Trash2, Eye, LogOut, Lock, Unlock, XCircle, Clock } from 'lucide-react';
 import { superAdminApi, type AdminAccountSummary } from '../../services/superAdminApi';
 import { Card, StatusPill, EmptyState, PageHeader, relativeTime } from './components';
 
-// The main app's own dev origin — impersonation opens a new tab there with
-// a short-lived token, since this console and the exam platform are
-// deliberately separate apps (see the port-2002 extraction).
-const MAIN_APP_ORIGIN = 'http://localhost:5173';
+// The exam platform's origin — impersonation opens a new tab there with a
+// short-lived token, since this console and the exam platform are
+// deliberately separate apps (see the port-2002 extraction). This was
+// previously hardcoded to the local dev origin (localhost:5173), which meant
+// "View as this admin" opened a dead localhost URL for every superadmin
+// visiting the deployed console.
+//
+// Set explicitly via VITE_Impersonating_url_superadmin in this app's .env
+// (e.g. VITE_Impersonating_url_superadmin="https://your-exam-platform-domain").
+// Vite only exposes client-side env vars prefixed with VITE_ — the prefix is
+// required, "Impersonating_url_superadmin" alone will not be picked up.
+const viteEnv = (import.meta as unknown as { env?: Record<string, unknown> }).env || {};
+const isLocalBrowser =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const configuredMainAppOrigin =
+  typeof viteEnv.VITE_Impersonating_url_superadmin === 'string'
+    ? viteEnv.VITE_Impersonating_url_superadmin.replace(/\/+$/, '')
+    : '';
+// No hardcoded production guess here on purpose — a wrong guess (e.g. a
+// domain that isn't actually this deployment's) is worse than refusing to
+// open anything, since it fails silently instead of obviously. Only
+// localhost:5173 is assumed, since that's genuinely this repo's fixed local
+// dev port (see ecosystem.config.js / frontend's vite preview script), not a
+// guess about which exam-platform domain a given deployment uses.
+const MAIN_APP_ORIGIN = configuredMainAppOrigin || (isLocalBrowser ? 'http://localhost:5173' : '');
 
 export default function SuperAdminAccounts() {
   const [admins, setAdmins] = useState<AdminAccountSummary[] | null>(null);
@@ -70,10 +92,17 @@ export default function SuperAdminAccounts() {
   };
 
   const impersonate = async (admin: AdminAccountSummary) => {
+    if (!MAIN_APP_ORIGIN) {
+      toast.error(
+        "Exam platform URL isn't configured. Set VITE_Impersonating_url_superadmin in this app's .env, rebuild, and restart.",
+        { duration: 8000 }
+      );
+      return;
+    }
     try {
       const { data } = await superAdminApi.impersonateAccount(admin.id);
       window.open(`${MAIN_APP_ORIGIN}/admin/impersonate?token=${encodeURIComponent(data.token)}`, '_blank');
-      toast.success(`Impersonation session opened for ${admin.email} (15 min)`);
+      toast.success(`Impersonation session opened for ${admin.email} (${data.expiresInMinutes} min)`);
     } catch {
       toast.error('Failed to start impersonation');
     }
@@ -85,6 +114,16 @@ export default function SuperAdminAccounts() {
       toast.success(`${admin.email} logged out of every session`);
     } catch {
       toast.error('Failed to force logout');
+    }
+  };
+
+  const lock = async (admin: AdminAccountSummary) => {
+    try {
+      await superAdminApi.lockAdminSecurity(admin.id);
+      toast.success(`${admin.email} locked — blocked from logging in or taking actions until unlocked`);
+      void load();
+    } catch {
+      toast.error('Failed to lock');
     }
   };
 
@@ -152,7 +191,7 @@ export default function SuperAdminAccounts() {
                     <div className="flex items-center justify-end gap-1.5">
                       <button
                         onClick={() => void impersonate(a)}
-                        title="View as this admin (15 min)"
+                        title="View as this admin (2 min)"
                         className="p-1.5 text-sa-ink-faint hover:text-sa-accent transition-colors"
                       >
                         <Eye size={15} />
@@ -164,13 +203,21 @@ export default function SuperAdminAccounts() {
                       >
                         <LogOut size={15} />
                       </button>
-                      {a.securityLocked && (
+                      {a.securityLocked ? (
                         <button
                           onClick={() => void unlock(a)}
                           title="Unlock"
                           className="p-1.5 text-sa-ink-faint hover:text-sa-good transition-colors"
                         >
                           <Unlock size={15} />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => void lock(a)}
+                          title="Lock this account (manual — same mechanism as the automatic anomaly lock)"
+                          className="p-1.5 text-sa-ink-faint hover:text-sa-critical transition-colors"
+                        >
+                          <Lock size={15} />
                         </button>
                       )}
                       {a.pendingDeletionAt ? (

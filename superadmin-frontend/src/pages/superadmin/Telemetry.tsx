@@ -1,11 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { toast } from 'react-hot-toast';
-import { superAdminApi, type LiveTelemetry, type TelemetrySnapshotEntry } from '../../services/superAdminApi';
-import { getRealtimeSocket } from '../../services/realtimeService';
-import { Card, KpiTile, PageHeader, EmptyState } from './components';
-
-const MAX_HISTORY_POINTS = 120;
+import { useSuperAdminRealtimeStore } from '../../context/superAdminRealtimeStore';
+import { Card, KpiTile, PageHeader, EmptyState, StatusPill } from './components';
 
 function fmt(value: number | null, unit: string, digits = 0): string {
   if (value === null || value === undefined) return '—';
@@ -26,6 +21,37 @@ function fpsLabel(fps: number | null): string {
   return 'janky';
 }
 
+function fmtBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined) return '—';
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${(bytes / 1024 ** 2).toFixed(0)} MB`;
+}
+
+function fmtUptime(ms: number | null): string {
+  if (ms === null) return '—';
+  const totalMin = Math.floor(ms / 60_000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
+function pctTone(pct: number | null): 'good' | 'warn' | 'critical' | 'default' {
+  if (pct === null) return 'default';
+  if (pct >= 90) return 'critical';
+  if (pct >= 75) return 'warn';
+  return 'good';
+}
+
+function processStatusTone(status: string): 'good' | 'warn' | 'critical' | 'dim' {
+  if (status === 'online') return 'good';
+  if (status === 'stopped' || status === 'errored') return 'critical';
+  return 'warn';
+}
+
 const tooltipStyle = {
   contentStyle: { background: '#1A1A1F', border: '1px solid #3A3A42', borderRadius: 8, fontSize: 12 },
   labelStyle: { color: '#9B9BA5' },
@@ -37,53 +63,16 @@ const gridProps = {
   yAxis: { tick: { fill: '#68686F', fontSize: 10 }, axisLine: false as const, tickLine: false as const, width: 36 },
 };
 
+// live/history/resources are populated by SuperAdminLayout (mounted for the
+// whole session) into the shared realtime store, so they're already current
+// the moment this page opens and keep updating in the background while it's
+// closed — this component only reads, it doesn't fetch or subscribe itself.
 export default function SuperAdminTelemetry() {
-  const [live, setLive] = useState<LiveTelemetry | null>(null);
-  const [history, setHistory] = useState<TelemetrySnapshotEntry[]>([]);
+  const live = useSuperAdminRealtimeStore((s) => s.live);
+  const history = useSuperAdminRealtimeStore((s) => s.history);
+  const resources = useSuperAdminRealtimeStore((s) => s.resources);
 
-  const loadLive = useCallback(async () => {
-    try {
-      const { data } = await superAdminApi.getLiveTelemetry();
-      setLive(data);
-    } catch {
-      // silent — the live socket feed will populate this shortly after
-    }
-  }, []);
-
-  const loadHistory = useCallback(async () => {
-    try {
-      const { data } = await superAdminApi.getTelemetryHistory(MAX_HISTORY_POINTS);
-      setHistory(data.snapshots);
-    } catch {
-      toast.error('Failed to load telemetry history');
-    }
-  }, []);
-
-  // One-time fetch for immediate paint; everything after this arrives live
-  // over the socket (telemetry-tick / telemetry-snapshot) — no polling.
-  useEffect(() => {
-    void loadLive();
-    void loadHistory();
-  }, [loadLive, loadHistory]);
-
-  useEffect(() => {
-    const socket = getRealtimeSocket();
-
-    const handleTick = (payload: LiveTelemetry) => setLive(payload);
-    const handleSnapshot = (snapshot: TelemetrySnapshotEntry) => {
-      setHistory((prev) => [...prev, snapshot].slice(-MAX_HISTORY_POINTS));
-    };
-
-    socket.on('telemetry-tick', handleTick);
-    socket.on('telemetry-snapshot', handleSnapshot);
-
-    return () => {
-      socket.off('telemetry-tick', handleTick);
-      socket.off('telemetry-snapshot', handleSnapshot);
-    };
-  }, []);
-
-  const chartData = history.map((s) => ({
+  const rawChartData = history.map((s) => ({
     time: new Date(s.capturedAt).toLocaleTimeString(),
     ping: s.medianPingMs,
     cvP50: s.cvLatencyP50Ms,
@@ -92,6 +81,31 @@ export default function SuperAdminTelemetry() {
     apiP50: s.apiLatencyP50Ms,
     apiP95: s.apiLatencyP95Ms,
   }));
+
+  // Every metric here only has a real value while something is actually
+  // generating it (an admin's browser tab open and reporting fps/ping, an
+  // admin API request in flight, a CV analysis call) — a snapshot is still
+  // taken every 60s regardless, so a quiet stretch at either end of the
+  // fetched window is an all-null row, not a zero. Charting the raw history
+  // unchanged left that quiet padding in place, which squeezed the actual
+  // data into the middle of the chart with dead space on one or both sides.
+  // Trimming the leading/trailing all-null rows makes the real data span the
+  // full chart width — connectNulls on each Area still bridges any gaps
+  // *within* that span the same as before.
+  const firstDataIndex = rawChartData.findIndex(
+    (p) => p.ping !== null || p.cvP50 !== null || p.cvP95 !== null || p.appFps !== null || p.apiP50 !== null || p.apiP95 !== null
+  );
+  const lastDataIndex = (() => {
+    for (let i = rawChartData.length - 1; i >= 0; i--) {
+      const p = rawChartData[i];
+      if (p.ping !== null || p.cvP50 !== null || p.cvP95 !== null || p.appFps !== null || p.apiP50 !== null || p.apiP95 !== null) {
+        return i;
+      }
+    }
+    return -1;
+  })();
+  const chartData =
+    firstDataIndex === -1 ? [] : rawChartData.slice(firstDataIndex, lastDataIndex + 1);
 
   return (
     <div>
@@ -234,6 +248,72 @@ export default function SuperAdminTelemetry() {
           )}
         </Card>
       </div>
+
+      {/* ---- System resources: the actual host/process/DB numbers, the same class
+           of data PM2's own dashboard shows for these processes ---- */}
+      <h2 className="text-[11px] font-semibold text-sa-accent2 mb-2.5 mt-8">
+        System resources
+      </h2>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <KpiTile
+          label="Host CPU load"
+          value={fmt(resources?.host.cpuLoadPct ?? null, '%', 1)}
+          sub={`${resources?.host.cpuCores ?? '—'} cores`}
+          tone={pctTone(resources?.host.cpuLoadPct ?? null)}
+        />
+        <KpiTile
+          label="Host memory"
+          value={fmt(resources?.host.memUsedPct ?? null, '%', 1)}
+          sub={`${fmtBytes(resources?.host.memUsedBytes)} / ${fmtBytes(resources?.host.memTotalBytes)}`}
+          tone={pctTone(resources?.host.memUsedPct ?? null)}
+        />
+        <KpiTile
+          label="Disk used"
+          value={fmt(resources?.host.diskUsedPct ?? null, '%', 1)}
+          sub={resources?.host.diskTotalBytes ? `${fmtBytes(resources.host.diskUsedBytes)} / ${fmtBytes(resources.host.diskTotalBytes)}` : 'not available on this host'}
+          tone={pctTone(resources?.host.diskUsedPct ?? null)}
+        />
+        <KpiTile
+          label="DB connections"
+          value={resources?.dbPool ? resources.dbPool.activeConnections : '—'}
+          sub="active, this database"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <KpiTile label="Pending account deletions" value={resources?.backlog.pendingAdminDeletions ?? '—'} sub="scheduled, awaiting grace period" />
+        <KpiTile label="Host uptime" value={resources ? fmtUptime(resources.host.uptimeSec * 1000) : '—'} />
+      </div>
+
+      <Card title="PM2 processes" meta="cpu / memory / restarts, live">
+        {resources?.processes && resources.processes.length > 0 ? (
+          <div className="flex flex-col">
+            <div className="grid grid-cols-[1.5fr_repeat(4,1fr)] gap-2 text-[11px] text-sa-ink-faint px-1 pb-2">
+              <span>Process</span>
+              <span>Status</span>
+              <span>CPU</span>
+              <span>Memory</span>
+              <span>Restarts</span>
+            </div>
+            {resources.processes.map((p) => (
+              <div
+                key={p.pmId}
+                className="grid grid-cols-[1.5fr_repeat(4,1fr)] gap-2 items-center py-2 border-b border-sa-line-soft last:border-0"
+              >
+                <span className="text-[13px] text-sa-ink truncate">{p.name}</span>
+                <StatusPill tone={processStatusTone(p.status)}>{p.status}</StatusPill>
+                <span className="text-[13px] text-sa-ink-dim tabular-nums">{p.cpuPct.toFixed(0)}%</span>
+                <span className="text-[13px] text-sa-ink-dim tabular-nums">{fmtBytes(p.memBytes)}</span>
+                <span className="text-[13px] text-sa-ink-dim tabular-nums">{p.restarts}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState>
+            {resources ? 'PM2 not reachable from this process — not running under PM2, or the CLI is unavailable.' : 'Collecting…'}
+          </EmptyState>
+        )}
+      </Card>
     </div>
   );
 }
