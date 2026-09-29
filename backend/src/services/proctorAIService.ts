@@ -154,6 +154,11 @@ export interface ProctoringAnalysis {
     description: string;
     metadata?: Record<string, unknown>;
   }>;
+  // Set by useProctoring.ts when client-side inference (onnxruntime-web YOLO
+  // and/or the MediaPipe FaceLandmarker) threw this cycle, so the server-side
+  // fallback that follows has a concrete reason attached in its logs instead
+  // of just an absent clientViolations array.
+  clientVisionError?: string;
 }
 
 export interface ViolationEvent {

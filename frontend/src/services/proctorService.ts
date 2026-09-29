@@ -153,6 +153,10 @@ export async function submitAnalysis(sessionId: string, analysisData: {
     description: string;
     metadata?: Record<string, unknown>;
   }>;
+  // Set when client-side inference (onnxruntime-web/MediaPipe) threw this
+  // cycle, so the backend's fallback-to-server-detection log has a reason
+  // attached instead of just an absent clientViolations array.
+  clientVisionError?: string;
 }): Promise<{ violations: ViolationData[]; shouldTerminate: boolean }> {
   const response = await api.post(`/proctoring/session/${sessionId}/analysis`, analysisData);
   return {
