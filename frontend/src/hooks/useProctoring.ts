@@ -1012,8 +1012,22 @@ export function useProctoring(attemptId: string, config: Partial<ProctorConfig> 
               });
             }
 
-            const clientSession = await loadClientVisionModel();
-            const detections = await runClientDetection(clientSession, activeVideo);
+            let clientSession;
+            try {
+              clientSession = await loadClientVisionModel();
+            } catch (modelLoadError) {
+              const message = modelLoadError instanceof Error ? modelLoadError.message : 'unknown';
+              throw new Error(`model_load_failed: ${message}`);
+            }
+
+            let detections;
+            try {
+              detections = await runClientDetection(clientSession, activeVideo);
+            } catch (inferenceError) {
+              const message = inferenceError instanceof Error ? inferenceError.message : 'unknown';
+              throw new Error(`inference_failed: ${message}`);
+            }
+
             clientViolations = detectionsToViolations(detections, faceMeshSignal);
             traceLog('client_vision_detection', {
               sessionId: session.sessionId,
@@ -1023,6 +1037,16 @@ export function useProctoring(attemptId: string, config: Partial<ProctorConfig> 
               faceMeshFaceCount: faceMeshSignal?.faceCount,
               faceMeshGaze: faceMeshSignal?.gazeDirection,
             });
+          } else {
+            // No video element with usable dimensions yet (camera stream not
+            // attached/ready this cycle) — clientViolations stays undefined
+            // and this cycle falls back to the server with no exception ever
+            // thrown, which previously showed up indistinguishable from a
+            // real model failure. Surfaced explicitly so `pm2 logs backend`
+            // can tell "camera not ready" apart from "model load/inference
+            // failed" (see clientVisionErrorMessage below).
+            clientVisionErrorMessage = 'no_active_video_element';
+            traceLog('client_vision_no_video', { sessionId: session.sessionId });
           }
         } catch (clientVisionError) {
         // Model failed to load or infer this cycle — leave clientViolations
