@@ -7,8 +7,8 @@ export default defineConfig({
     allowedHosts: [
       'localhost',
       '127.0.0.1',
-      'unpreaching-unaugmentative-raelynn.ngrok-free.dev',
-      'unimputable-reva-puzzledly.ngrok-free.dev'
+      'exam.talentstaq.ai'
+      
     ],
     port: 5173,
     proxy: {
