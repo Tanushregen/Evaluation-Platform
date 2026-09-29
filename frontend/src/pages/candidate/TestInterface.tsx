@@ -286,7 +286,7 @@ export default function TestInterface() {
   // while the candidate is mid-reply -- restarts whenever a new message arrives.
   useEffect(() => {
     if (!proctorChatOpen || proctorReplyText.trim()) return;
-    const timer = setTimeout(() => setProctorChatOpen(false), 15000);
+    const timer = setTimeout(() => setProctorChatOpen(false), 6000);
     return () => clearTimeout(timer);
   }, [proctorChatOpen, proctorMessages.length, proctorReplyText]);
 
