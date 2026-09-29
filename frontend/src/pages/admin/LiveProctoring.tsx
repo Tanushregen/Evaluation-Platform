@@ -3,17 +3,29 @@ import { useParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ChevronDown,
+  Clock,
   Eye,
   LayoutGrid,
   Mic,
   Monitor,
-  Pin,
   Search,
   Send,
   ShieldCheck,
+  Signal,
+  Wifi,
+  WifiOff,
   X,
 } from 'lucide-react';
-import { RemoteParticipant, RemoteTrack, RemoteTrackPublication, Room, RoomEvent, Track } from 'livekit-client';
+import {
+  ConnectionQuality,
+  Participant,
+  RemoteParticipant,
+  RemoteTrack,
+  RemoteTrackPublication,
+  Room,
+  RoomEvent,
+  Track,
+} from 'livekit-client';
 import { adminApi } from '../../services/api';
 
 interface LiveCandidate {
@@ -32,6 +44,8 @@ interface LiveCandidate {
   cameraEnabled?: boolean;
   microphoneEnabled?: boolean;
   screenShareEnabled?: boolean;
+  startTime?: string;
+  durationMinutes?: number;
 }
 
 function trustColor(score: number) {
@@ -391,56 +405,7 @@ function GridTile({
         flexShrink: 0,
       }}
     >
-      {isSelected ? (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(145deg, #101827 0%, #17243A 100%)',
-          }}
-        >
-          <div
-            style={{
-              width: '52px',
-              height: '52px',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(255,255,255,0.10)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'white',
-              fontSize: '12px',
-              fontWeight: 800,
-            }}
-          >
-            {candidate.initials}
-          </div>
-          <span
-            style={{
-              position: 'absolute',
-              top: '8px',
-              right: '8px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '22px',
-              height: '22px',
-              borderRadius: '6px',
-              backgroundColor: 'rgba(96,165,250,0.85)',
-              color: 'white',
-            }}
-            title="Showing in main stage"
-          >
-            <Pin size={11} />
-          </span>
-        </div>
-      ) : (
-        <CandidateVideo attemptId={candidate.attemptId} active onRoom={onRoom} />
-      )}
+      <CandidateVideo attemptId={candidate.attemptId} active onRoom={onRoom} />
 
       <div
         style={{
@@ -463,28 +428,24 @@ function GridTile({
       </div>
 
       {candidate.warning && (
-        <div
+        <span
+          title={candidate.warning}
           style={{
             position: 'absolute',
             top: '8px',
             right: '8px',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '4px',
-            padding: '3px 7px',
-            borderRadius: '6px',
+            justifyContent: 'center',
+            width: '22px',
+            height: '22px',
+            borderRadius: '50%',
             backgroundColor: 'rgba(225,29,72,0.92)',
             color: 'white',
-            fontSize: '10px',
-            fontWeight: 700,
-            maxWidth: '65%',
           }}
         >
-          <AlertTriangle size={11} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {candidate.warning}
-          </span>
-        </div>
+          <AlertTriangle size={12} />
+        </span>
       )}
 
       <div
@@ -540,17 +501,166 @@ function GridTile({
   );
 }
 
+// Attaches to a Room the sidebar strip already connected, instead of opening
+// a second viewer connection for the same candidate: LiveKit assigns one
+// fixed admin identity per attemptId, so a second independent connection
+// would just fight the first for that identity and disconnect it.
+function SharedRoomVideo({ room }: { room: Room | null }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const attachedVideoRef = useRef<RemoteTrack | null>(null);
+  const [hasVideo, setHasVideo] = useState(false);
+
+  useEffect(() => {
+    setHasVideo(false);
+    if (!room) return;
+
+    const attachTrack = (track: RemoteTrack, publication?: RemoteTrackPublication) => {
+      if (track.kind === Track.Kind.Video && publication?.source === Track.Source.Camera && videoRef.current) {
+        if (attachedVideoRef.current && attachedVideoRef.current !== track) {
+          attachedVideoRef.current.detach(videoRef.current);
+        }
+        track.attach(videoRef.current);
+        attachedVideoRef.current = track;
+        setHasVideo(true);
+      }
+      if (track.kind === Track.Kind.Audio && audioRef.current) {
+        track.attach(audioRef.current);
+      }
+    };
+
+    room.remoteParticipants.forEach((participant) => {
+      participant.trackPublications.forEach((publication) => {
+        if (publication.track) attachTrack(publication.track, publication);
+      });
+    });
+
+    room.on(RoomEvent.TrackSubscribed, attachTrack);
+    return () => {
+      room.off(RoomEvent.TrackSubscribed, attachTrack);
+      if (videoRef.current && attachedVideoRef.current) {
+        attachedVideoRef.current.detach(videoRef.current);
+      }
+      attachedVideoRef.current = null;
+    };
+  }, [room]);
+
+  return (
+    <>
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          backgroundColor: '#020617',
+        }}
+      />
+      <audio ref={audioRef} autoPlay />
+      {!hasVideo && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#CBD5E1',
+            fontSize: '12px',
+            fontWeight: 700,
+            backgroundColor: 'rgba(15,23,42,0.74)',
+          }}
+        >
+          {room ? 'Connecting live video...' : 'Waiting for connection...'}
+        </div>
+      )}
+    </>
+  );
+}
+
+function formatRemaining(ms: number): string {
+  const clamped = Math.max(0, ms);
+  const totalSeconds = Math.floor(clamped / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+}
+
+// Ticking countdown to the end of the candidate's exam window, derived from
+// their attempt start time + the test's duration (no server round-trip).
+function useRemainingTime(startTime?: string, durationMinutes?: number) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!startTime || !durationMinutes) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [startTime, durationMinutes]);
+
+  if (!startTime || !durationMinutes) return null;
+  const deadline = new Date(startTime).getTime() + durationMinutes * 60000;
+  return deadline - now;
+}
+
+// LiveKit only exposes connection quality (excellent/good/poor) for a remote
+// participant, not a literal round-trip ping — this mirrors what the
+// candidate's connection to the LiveKit server looks like server-side.
+function useConnectionQuality(room: Room | null): ConnectionQuality | null {
+  const [quality, setQuality] = useState<ConnectionQuality | null>(null);
+
+  useEffect(() => {
+    setQuality(null);
+    if (!room) return;
+
+    const findCandidate = () =>
+      Array.from(room.remoteParticipants.values()).find((participant) =>
+        participant.identity?.startsWith('candidate:')
+      );
+
+    const current = findCandidate();
+    if (current) setQuality(current.connectionQuality);
+
+    const handleChange = (q: ConnectionQuality, participant: Participant) => {
+      if (participant.identity?.startsWith('candidate:')) setQuality(q);
+    };
+    room.on(RoomEvent.ConnectionQualityChanged, handleChange);
+    return () => {
+      room.off(RoomEvent.ConnectionQualityChanged, handleChange);
+    };
+  }, [room]);
+
+  return quality;
+}
+
+const CONNECTION_QUALITY_DISPLAY: Record<ConnectionQuality, { label: string; color: string; icon: typeof Wifi }> = {
+  [ConnectionQuality.Excellent]: { label: 'Excellent', color: '#34D399', icon: Wifi },
+  [ConnectionQuality.Good]: { label: 'Good', color: '#FBBF24', icon: Wifi },
+  [ConnectionQuality.Poor]: { label: 'Poor', color: '#F87171', icon: Signal },
+  [ConnectionQuality.Lost]: { label: 'Disconnected', color: '#F87171', icon: WifiOff },
+  [ConnectionQuality.Unknown]: { label: 'Unknown', color: '#94A3B8', icon: Signal },
+};
+
 // Main stage: the big center preview of whichever tile is selected in the
-// participants strip, Google Meet-style. Renders the only live connection for
-// that candidate (the strip tile shows an avatar placeholder while selected)
-// so we never open two viewer connections for the same attemptId at once.
+// participants strip, Google Meet-style. `room` is the same Room object the
+// selected tile is already connected to (see SharedRoomVideo above).
 function MainStage({
   candidate,
-  onRoom,
+  room,
 }: {
   candidate: LiveCandidate | null;
-  onRoom: (room: Room | null) => void;
+  room: Room | null;
 }) {
+  const remainingMs = useRemainingTime(candidate?.startTime, candidate?.durationMinutes);
+  const connectionQuality = useConnectionQuality(room);
+  const qualityInfo = connectionQuality ? CONNECTION_QUALITY_DISPLAY[connectionQuality] : null;
+  const QualityIcon = qualityInfo?.icon || Signal;
   if (!candidate?.attemptId) {
     return (
       <div
@@ -583,7 +693,7 @@ function MainStage({
         backgroundColor: '#0F172A',
       }}
     >
-      <CandidateVideo attemptId={candidate.attemptId} active onRoom={onRoom} />
+      <SharedRoomVideo room={room} />
 
       <div
         style={{
@@ -648,6 +758,58 @@ function MainStage({
       >
         {candidate.name}
         {!candidate.microphoneEnabled && <Mic size={13} color="#94A3B8" />}
+      </div>
+
+      <div
+        style={{
+          position: 'absolute',
+          bottom: '14px',
+          right: '14px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '6px',
+        }}
+      >
+        {remainingMs !== null && (
+          <span
+            title="Time remaining in the exam"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 11px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              color: remainingMs <= 60000 ? '#F87171' : 'white',
+              fontSize: '12px',
+              fontWeight: 800,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            <Clock size={12} />
+            {remainingMs > 0 ? formatRemaining(remainingMs) : "Time's up"}
+          </span>
+        )}
+        {qualityInfo && (
+          <span
+            title={`Candidate connection quality: ${qualityInfo.label}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 11px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              color: qualityInfo.color,
+              fontSize: '12px',
+              fontWeight: 700,
+            }}
+          >
+            <QualityIcon size={12} />
+            {qualityInfo.label}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -854,6 +1016,8 @@ export default function LiveProctoring() {
             cameraEnabled: item.status?.cameraEnabled,
             microphoneEnabled: item.status?.microphoneEnabled,
             screenShareEnabled: item.status?.screenShareEnabled,
+            startTime: item.startTime,
+            durationMinutes: item.test?.duration,
           };
         });
         setLiveCandidates(candidates);
@@ -1402,9 +1566,9 @@ export default function LiveProctoring() {
             style={{
               height: '56px',
               flexShrink: 0,
-              display: 'flex',
+              display: 'grid',
+              gridTemplateColumns: '1fr auto 1fr',
               alignItems: 'center',
-              justifyContent: 'space-between',
               gap: '12px',
               padding: '0 18px',
               borderBottom: '1px solid rgba(255,255,255,0.08)',
@@ -1428,12 +1592,29 @@ export default function LiveProctoring() {
                 {visibleCandidates.filter((candidate) => candidate.attemptId).length} candidates
               </span>
             </div>
+
+            <p
+              style={{
+                margin: 0,
+                justifySelf: 'center',
+                color: 'white',
+                fontSize: '17px',
+                fontWeight: 900,
+                fontFamily: 'Calibri, sans-serif',
+                letterSpacing: '0.01em',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              TalentstaQ LiveView
+            </p>
+
             <button
               type="button"
               title="Close grid view"
               aria-label="Close grid view"
               onClick={() => setGridViewOpen(false)}
               style={{
+                justifySelf: 'end',
                 width: '34px',
                 height: '34px',
                 borderRadius: '9px',
@@ -1493,9 +1674,7 @@ export default function LiveProctoring() {
             <div style={{ flex: 1, minWidth: 0, padding: '16px', display: 'flex' }}>
               <MainStage
                 candidate={gridChatCandidate}
-                onRoom={(room) => {
-                  if (gridChatAttemptId) handleGridTileRoom(gridChatAttemptId, room);
-                }}
+                room={(gridChatAttemptId && gridRoomsRef.current[gridChatAttemptId]) || null}
               />
             </div>
 
