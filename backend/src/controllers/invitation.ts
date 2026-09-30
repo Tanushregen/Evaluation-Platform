@@ -12,6 +12,7 @@ import {
 } from '../services/invitationService.js';
 import { buildSebConfigXml } from '../services/sebConfigService.js';
 import { deleteAttemptFiles } from '../services/fileStorageService.js';
+import { getAssessmentCandidateContext } from '../utils/b2Storage.js';
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -358,21 +359,18 @@ export async function deleteTestInvitationCandidate(req: AuthenticatedRequest, r
       attemptIds = attempts.map((a) => a.id);
     }
 
-    // Resolve and delete B2 recordings/snapshots (and their metadata sidecars)
-    // BEFORE the TestAttempt rows are deleted below — deleteAttemptFiles needs
-    // to read the TestAttempt (via getAssessmentCandidateContext) to work out
-    // the B2 folder path, and that lookup returns nothing once the row is
-    // gone (its in-memory cache only saves this if the process never
-    // restarted since the candidate's attempt). Best-effort: candidate
-    // removal proceeds even if a bucket cleanup call fails.
-    for (const attemptId of attemptIds) {
-      try {
-        await deleteAttemptFiles(attemptId);
-      } catch (cleanupError) {
-        console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
-      }
-    }
+    // Warm getAssessmentCandidateContext's in-memory cache for each attempt
+    // while the TestAttempt row still exists — it resolves the B2 folder path
+    // from the TestAttempt/candidate/test relations, and there's nothing left
+    // to resolve once the row is deleted below. This is a read-only DB lookup
+    // (fast); the actual bucket deletes (slow, network I/O) happen after the
+    // DB transaction commits, using this warmed cache, so the transaction
+    // itself stays quick and the delete-candidate race window stays small.
+    await Promise.all(attemptIds.map((id) => getAssessmentCandidateContext(id).catch(() => null)));
 
+    // deleteMany (not delete) so a concurrent duplicate request — e.g. a
+    // double-click firing two DELETE calls for the same invitation — doesn't
+    // throw P2025 "record to delete does not exist" when it loses the race.
     await prisma.$transaction(async (tx) => {
       if (candidate) {
         await tx.testAttempt.deleteMany({
@@ -383,10 +381,20 @@ export async function deleteTestInvitationCandidate(req: AuthenticatedRequest, r
         });
       }
 
-      await tx.testInvitation.delete({
+      await tx.testInvitation.deleteMany({
         where: { id: invitation.id }
       });
     });
+
+    // Best-effort: candidate removal has already succeeded even if a bucket
+    // cleanup call fails.
+    for (const attemptId of attemptIds) {
+      try {
+        await deleteAttemptFiles(attemptId);
+      } catch (cleanupError) {
+        console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
+      }
+    }
 
     res.json({ message: 'Candidate removed from test successfully' });
   } catch (error) {

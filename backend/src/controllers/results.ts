@@ -15,6 +15,7 @@ import { sendCandidateScoreWebhook, dispatchCompanyWebhookEvent } from '../servi
 import { performSubmission } from './candidate.js';
 import { reconcileCandidateEgressRecording } from '../services/liveKitEgressService.js';
 import { deleteAttemptFiles } from '../services/fileStorageService.js';
+import { getAssessmentCandidateContext } from '../utils/b2Storage.js';
 
 async function resolveCompanyName(companyId: string | null): Promise<string> {
   if (!companyId) return 'Our Team';
@@ -962,18 +963,31 @@ export async function deleteAttempt(req: AuthenticatedRequest, res: Response): P
       return;
     }
 
-    // FileStorage.attemptId isn't a FK, so nothing cascades from the delete
-    // below — clean up B2 recordings/snapshots for this attempt BEFORE
-    // deleting the row, since deleteAttemptFiles needs the TestAttempt (via
-    // getAssessmentCandidateContext) to resolve the B2 folder path. Best-
-    // effort: the attempt delete proceeds even if bucket cleanup fails.
+    // Warm getAssessmentCandidateContext's in-memory cache while the row
+    // still exists — it resolves the B2 folder path from the TestAttempt
+    // relations, and there's nothing left to resolve once the row is
+    // deleted below. Read-only DB lookup (fast); the actual bucket delete
+    // (slow, network I/O) happens after, so this stays out of the delete's
+    // race window.
+    await getAssessmentCandidateContext(attemptId).catch(() => null);
+
+    // deleteMany (not delete) + count check so a concurrent duplicate
+    // request doesn't throw P2025 "record to delete does not exist" when it
+    // loses the race — FileStorage.attemptId isn't a FK, so nothing cascades
+    // from this delete either way.
+    const deleted = await prisma.testAttempt.deleteMany({ where: { id: attemptId } });
+    if (deleted.count === 0) {
+      res.status(404).json({ error: 'Attempt not found' });
+      return;
+    }
+
+    // Best-effort: the attempt delete has already succeeded even if bucket
+    // cleanup fails.
     try {
       await deleteAttemptFiles(attemptId);
     } catch (cleanupError) {
       console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
     }
-
-    await prisma.testAttempt.delete({ where: { id: attemptId } });
 
     res.json({ message: 'Attempt deleted successfully' });
   } catch (error) {
