@@ -341,24 +341,40 @@ export async function deleteTestInvitationCandidate(req: AuthenticatedRequest, r
       return;
     }
 
-    let attemptIds: string[] = [];
+    const candidate = await prisma.candidate.findUnique({
+      where: { email: invitation.email },
+      select: { id: true }
+    });
 
-    await prisma.$transaction(async (tx) => {
-      const candidate = await tx.candidate.findUnique({
-        where: { email: invitation.email },
+    let attemptIds: string[] = [];
+    if (candidate) {
+      const attempts = await prisma.testAttempt.findMany({
+        where: {
+          testId: invitation.testId,
+          candidateId: candidate.id
+        },
         select: { id: true }
       });
+      attemptIds = attempts.map((a) => a.id);
+    }
 
+    // Resolve and delete B2 recordings/snapshots (and their metadata sidecars)
+    // BEFORE the TestAttempt rows are deleted below — deleteAttemptFiles needs
+    // to read the TestAttempt (via getAssessmentCandidateContext) to work out
+    // the B2 folder path, and that lookup returns nothing once the row is
+    // gone (its in-memory cache only saves this if the process never
+    // restarted since the candidate's attempt). Best-effort: candidate
+    // removal proceeds even if a bucket cleanup call fails.
+    for (const attemptId of attemptIds) {
+      try {
+        await deleteAttemptFiles(attemptId);
+      } catch (cleanupError) {
+        console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
       if (candidate) {
-        const attempts = await tx.testAttempt.findMany({
-          where: {
-            testId: invitation.testId,
-            candidateId: candidate.id
-          },
-          select: { id: true }
-        });
-        attemptIds = attempts.map((a) => a.id);
-
         await tx.testAttempt.deleteMany({
           where: {
             testId: invitation.testId,
@@ -371,18 +387,6 @@ export async function deleteTestInvitationCandidate(req: AuthenticatedRequest, r
         where: { id: invitation.id }
       });
     });
-
-    // FileStorage.attemptId isn't a FK, so nothing cascades from the attempt
-    // delete above — clean up B2 recordings/snapshots (and their metadata
-    // sidecars) for each removed attempt. Best-effort: candidate removal has
-    // already succeeded even if a bucket cleanup call fails.
-    for (const attemptId of attemptIds) {
-      try {
-        await deleteAttemptFiles(attemptId);
-      } catch (cleanupError) {
-        console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
-      }
-    }
 
     res.json({ message: 'Candidate removed from test successfully' });
   } catch (error) {

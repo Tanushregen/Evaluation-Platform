@@ -962,16 +962,18 @@ export async function deleteAttempt(req: AuthenticatedRequest, res: Response): P
       return;
     }
 
-    await prisma.testAttempt.delete({ where: { id: attemptId } });
-
     // FileStorage.attemptId isn't a FK, so nothing cascades from the delete
-    // above — clean up B2 recordings/snapshots for this attempt. Best-effort:
-    // the attempt is already gone even if bucket cleanup fails.
+    // below — clean up B2 recordings/snapshots for this attempt BEFORE
+    // deleting the row, since deleteAttemptFiles needs the TestAttempt (via
+    // getAssessmentCandidateContext) to resolve the B2 folder path. Best-
+    // effort: the attempt delete proceeds even if bucket cleanup fails.
     try {
       await deleteAttemptFiles(attemptId);
     } catch (cleanupError) {
       console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
     }
+
+    await prisma.testAttempt.delete({ where: { id: attemptId } });
 
     res.json({ message: 'Attempt deleted successfully' });
   } catch (error) {
