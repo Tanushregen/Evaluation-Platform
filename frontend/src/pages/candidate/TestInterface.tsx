@@ -108,7 +108,13 @@ export default function TestInterface() {
   const [faceFrozen, setFaceFrozen] = useState(false);
   const [policyPaused, setPolicyPaused] = useState(false);
   const [policyPauseReason, setPolicyPauseReason] = useState('');
-  const [proctorMessage, setProctorMessage] = useState<{ id: string; text: string; at: number } | null>(null);
+  const [proctorMessages, setProctorMessages] = useState<{ id: string; text: string; at: number; from: 'admin' | 'candidate' }[]>([]);
+  const [proctorChatOpen, setProctorChatOpen] = useState(false);
+  // A new admin message shows as a brief single-message toast (not the full
+  // thread) so it doesn't look like the whole chat panel popped open; opening
+  // the panel is only ever a deliberate click on the bubble/toast.
+  const [proctorToastMessage, setProctorToastMessage] = useState<{ id: string; text: string; at: number } | null>(null);
+  const [proctorReplyText, setProctorReplyText] = useState('');
   // New state for redesigned UI
   const [markedForReview, setMarkedForReview] = useState<Set<number>>(new Set());
   const [autoSaved, setAutoSaved] = useState(false);
@@ -256,6 +262,7 @@ export default function TestInterface() {
   const {
     disconnect: disconnectLiveProctoring,
     error: liveProctoringError,
+    sendReply: sendProctorReply,
   } = useLiveProctoringPublisher({
     enabled: proctorEnabled && proctorStatus.isInitialized,
     attemptId: attemptId || '',
@@ -263,9 +270,72 @@ export default function TestInterface() {
     cameraStream,
     screenStream,
     onAdminMessage: (message) => {
-      setProctorMessage(message);
+      setProctorMessages((prev) => [...prev, { ...message, from: 'admin' }]);
+      // Only surface the brief toast if the candidate isn't already looking at
+      // the full panel -- there it's already visible in the thread.
+      if (!proctorChatOpen) {
+        setProctorToastMessage(message);
+      }
     },
   });
+
+  const handleSendProctorReply = () => {
+    const text = proctorReplyText.trim();
+    if (!text) return;
+    sendProctorReply(text);
+    setProctorMessages((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text, at: Date.now(), from: 'candidate' },
+    ]);
+    setProctorReplyText('');
+  };
+
+  const openProctorChat = () => {
+    setProctorToastMessage(null);
+    setProctorChatOpen(true);
+  };
+
+  // Auto-dismiss the single-message toast back to the plain bubble icon.
+  useEffect(() => {
+    if (!proctorToastMessage) return;
+    const timer = setTimeout(() => setProctorToastMessage(null), 6000);
+    return () => clearTimeout(timer);
+  }, [proctorToastMessage]);
+
+  // Auto-collapse the chat panel so it doesn't stay parked on screen, but not
+  // while the candidate is mid-reply -- restarts whenever a new message arrives.
+  useEffect(() => {
+    if (!proctorChatOpen || proctorReplyText.trim()) return;
+    const timer = setTimeout(() => setProctorChatOpen(false), 6000);
+    return () => clearTimeout(timer);
+  }, [proctorChatOpen, proctorMessages.length, proctorReplyText]);
+
+  // Persist the thread across a page refresh (tab close clears it, same as the
+  // rest of the in-exam session) -- scoped per attempt so it never leaks into
+  // a different candidate/exam sharing the same browser.
+  const proctorChatHydratedRef = useRef(false);
+  useEffect(() => {
+    if (!attemptId || proctorChatHydratedRef.current) return;
+    proctorChatHydratedRef.current = true;
+    try {
+      const raw = sessionStorage.getItem(`proctorChat:${attemptId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setProctorMessages(parsed);
+      }
+    } catch {
+      // Ignore unavailable/corrupt sessionStorage.
+    }
+  }, [attemptId]);
+
+  useEffect(() => {
+    if (!attemptId || proctorMessages.length === 0) return;
+    try {
+      sessionStorage.setItem(`proctorChat:${attemptId}`, JSON.stringify(proctorMessages));
+    } catch {
+      // Ignore storage quota/availability issues.
+    }
+  }, [attemptId, proctorMessages]);
 
   const proctorStatusRef = useRef(proctorStatus);
   const hiddenAtRef = useRef<number | null>(null);
@@ -1055,25 +1125,94 @@ export default function TestInterface() {
         </div>
       )}
 
-      {/* Proctor message */}
-      {proctorMessage && (
-        <div className="fixed top-16 right-4 z-50 w-[calc(100%-2rem)] max-w-sm sm:w-96">
-          <div className="overflow-hidden rounded-xl bg-indigo-600 text-white shadow-2xl ring-1 ring-black/10">
-            <div className="flex items-center justify-between bg-indigo-700 px-4 py-2">
-              <span className="text-xs font-bold uppercase tracking-wide">Message from Invigilator</span>
+      {/* Proctor chat: collapses to an icon-only bubble. A new admin message
+          shows only that single message as a brief toast (not the whole
+          thread/panel) and auto-dismisses back to the bubble after 6s.
+          Replying is only reachable by tapping the bubble/toast to open the
+          full panel, which itself auto-collapses after 6s idle. */}
+      {proctorMessages.length > 0 && (
+        <div className="fixed top-16 right-4 z-50">
+          {proctorChatOpen ? (
+            <div className="w-[calc(100vw-2rem)] max-w-sm overflow-hidden rounded-xl bg-indigo-600 text-white shadow-2xl ring-1 ring-black/10 sm:w-96">
               <button
                 type="button"
-                aria-label="Dismiss proctor message"
-                onClick={() => setProctorMessage(null)}
-                className="flex h-6 w-6 items-center justify-center rounded text-lg leading-none transition-colors hover:bg-white/15"
+                onClick={() => setProctorChatOpen(false)}
+                className="flex w-full items-center justify-between bg-indigo-700 px-4 py-2"
               >
-                &times;
+                <span className="text-xs font-bold uppercase tracking-wide">Message from Invigilator</span>
+                <span aria-hidden className="text-xs">Hide</span>
               </button>
+              <div className="flex max-h-48 flex-col gap-2 overflow-y-auto px-3 py-3">
+                {proctorMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                      message.from === 'admin'
+                        ? 'self-start bg-indigo-800/70'
+                        : 'self-end bg-white/15'
+                    }`}
+                  >
+                    <p className="whitespace-pre-wrap break-words font-medium">{message.text}</p>
+                    <span className="mt-1 block text-[10px] opacity-75">
+                      {new Date(message.at).toLocaleTimeString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleSendProctorReply();
+                }}
+                className="flex gap-2 border-t border-white/10 px-3 py-2"
+              >
+                <input
+                  value={proctorReplyText}
+                  onChange={(event) => setProctorReplyText(event.target.value)}
+                  placeholder="Reply to invigilator..."
+                  aria-label="Reply to invigilator"
+                  maxLength={500}
+                  className="min-w-0 flex-1 rounded-md border-0 bg-white/10 px-3 py-1.5 text-sm text-white placeholder-white/60 outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={!proctorReplyText.trim()}
+                  className="shrink-0 rounded-md bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 disabled:opacity-50"
+                >
+                  Send
+                </button>
+              </form>
             </div>
-            <p className="whitespace-pre-wrap break-words px-4 py-3 text-sm font-medium">
-              {proctorMessage.text}
-            </p>
-          </div>
+          ) : proctorToastMessage ? (
+            <button
+              type="button"
+              onClick={openProctorChat}
+              aria-label="Open message from invigilator"
+              className="flex max-w-xs items-start gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-left text-white shadow-2xl ring-1 ring-black/10 hover:bg-indigo-700"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8-1.06 0-2.076-.163-3.02-.465L3 21l1.395-4.185A7.946 7.946 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              <span className="min-w-0">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-indigo-200">
+                  Message from Invigilator
+                </span>
+                <span className="block truncate text-sm font-medium">{proctorToastMessage.text}</span>
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={openProctorChat}
+              aria-label="Open message from invigilator"
+              title="Message from invigilator"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-2xl ring-1 ring-black/10 transition-transform hover:scale-105 hover:bg-indigo-700"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8-1.06 0-2.076-.163-3.02-.465L3 21l1.395-4.185A7.946 7.946 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </button>
+          )}
         </div>
       )}
 

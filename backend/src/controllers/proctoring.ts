@@ -2008,7 +2008,7 @@ export const getLiveTestSessions = async (req: Request, res: Response): Promise<
 
     const test = await prisma.test.findUnique({
       where: { id: testId },
-      select: { adminId: true, name: true },
+      select: { adminId: true, name: true, duration: true },
     });
 
     if (!test || test.adminId !== adminId) {
@@ -2070,8 +2070,9 @@ export const getLiveTestSessions = async (req: Request, res: Response): Promise<
         sessionId: session?.id || '',
         attemptId: attempt.id,
         testId,
-        test: { id: testId, name: test.name },
+        test: { id: testId, name: test.name, duration: test.duration },
         candidate: attempt.candidate,
+        startTime: attempt.startTime,
         status: {
           online,
           cameraEnabled: session?.cameraEnabled || false,
@@ -2139,6 +2140,7 @@ export const getAllLiveAdminSessions = async (req: Request, res: Response): Prom
           select: {
             id: true,
             name: true,
+            duration: true,
           },
         },
         analytics: {
@@ -2180,6 +2182,7 @@ export const getAllLiveAdminSessions = async (req: Request, res: Response): Prom
         testId: attempt.testId,
         test: attempt.test,
         candidate: attempt.candidate,
+        startTime: attempt.startTime,
         status: {
           online,
           cameraEnabled: session?.cameraEnabled || false,
