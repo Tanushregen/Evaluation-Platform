@@ -953,15 +953,22 @@ export async function deleteAttemptFiles(attemptId: string): Promise<{ deletedCo
     try {
       const context = await getAssessmentCandidateContext(attemptId);
       if (context) {
-        deletedCount = await deleteB2ObjectsByPrefix(`${context.folder}/`);
+        const prefix = `${context.folder}/`;
+        deletedCount = await deleteB2ObjectsByPrefix(prefix);
+        console.log(`[B2_CLEANUP] attempt=${attemptId} prefix="${prefix}" objectsDeleted=${deletedCount}`);
+      } else {
+        console.log(`[B2_CLEANUP] attempt=${attemptId} context=null (no TestAttempt/test/candidate found — nothing to delete)`);
       }
     } catch (error) {
       console.error(`Error deleting B2 folder for attempt ${attemptId}:`, error);
     }
+  } else {
+    console.log(`[B2_CLEANUP] attempt=${attemptId} skipped — B2 not configured`);
   }
 
   const recordings = await deleteFilesByReference('recording', { attemptId });
   const snapshots = await deleteFilesByReference('snapshot', { attemptId });
+  console.log(`[B2_CLEANUP] attempt=${attemptId} fileStorageRowsDeleted recordings=${recordings.deletedCount} snapshots=${snapshots.deletedCount}`);
 
   return { deletedCount: deletedCount || recordings.deletedCount + snapshots.deletedCount };
 }
