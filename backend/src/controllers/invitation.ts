@@ -386,17 +386,17 @@ export async function deleteTestInvitationCandidate(req: AuthenticatedRequest, r
       });
     });
 
-    // Best-effort: candidate removal has already succeeded even if a bucket
-    // cleanup call fails.
-    for (const attemptId of attemptIds) {
-      try {
-        await deleteAttemptFiles(attemptId);
-      } catch (cleanupError) {
-        console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
-      }
-    }
-
     res.json({ message: 'Candidate removed from test successfully' });
+
+    // Fire-and-forget: B2 cleanup walks every version of every object under
+    // the attempt's folder (see deleteB2ObjectsByPrefix), which can take a
+    // while for a candidate with large recordings — don't make the UI wait
+    // on it. Candidate removal has already succeeded even if this fails.
+    for (const attemptId of attemptIds) {
+      deleteAttemptFiles(attemptId).catch((cleanupError) => {
+        console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
+      });
+    }
   } catch (error) {
     console.error('Delete test invitation candidate error:', error);
     res.status(500).json({ error: getErrorMessage(error) });
