@@ -1211,9 +1211,13 @@ export function useProctoring(attemptId: string, config: Partial<ProctorConfig> 
       audioIntervalRef.current = setInterval(runAudioAnalysis, 2000);
     }
 
-    // Camera obstruction monitor (high-priority freeze safety).
+    // Camera obstruction monitor (high-priority freeze safety). 1000ms (was
+    // 500ms) — the freeze trigger itself requires 1200ms of sustained
+    // blockage regardless of polling granularity, so this halves main-thread
+    // canvas-analysis contention without changing how fast a real obstruction
+    // gets caught in practice.
     if (finalConfig.enableCamera) {
-      obstructionIntervalRef.current = setInterval(runObstructionMonitor, 500);
+      obstructionIntervalRef.current = setInterval(runObstructionMonitor, 1000);
     }
 
     // Analysis interval

@@ -50,6 +50,13 @@ function loadOrt(): Promise<typeof OrtNamespace> {
         // Single-threaded: avoids requiring SharedArrayBuffer / COOP+COEP
         // cross-origin isolation headers, which this app doesn't set.
         ort.env.wasm.numThreads = 1;
+        // Run inference in a Web Worker instead of the main thread. This is
+        // NOT multithreading (still numThreads=1, no SharedArrayBuffer/COOP+
+        // COEP needed) — it just moves the synchronous WASM forward pass off
+        // the thread that also handles clicks, React renders, and the exam
+        // UI's own network-latency ping, which were all getting blocked for
+        // the duration of every ~1s inference cycle.
+        ort.env.wasm.proxy = true;
         return ort;
       })
       .catch(err => {
