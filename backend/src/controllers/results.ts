@@ -14,6 +14,7 @@ import { scoreWrittenAnswer, scoreSpeakingAnswer } from '../services/communicati
 import { sendCandidateScoreWebhook, dispatchCompanyWebhookEvent } from '../services/candidateScoreWebhookService.js';
 import { performSubmission } from './candidate.js';
 import { reconcileCandidateEgressRecording } from '../services/liveKitEgressService.js';
+import { deleteAttemptFiles } from '../services/fileStorageService.js';
 
 async function resolveCompanyName(companyId: string | null): Promise<string> {
   if (!companyId) return 'Our Team';
@@ -962,6 +963,15 @@ export async function deleteAttempt(req: AuthenticatedRequest, res: Response): P
     }
 
     await prisma.testAttempt.delete({ where: { id: attemptId } });
+
+    // FileStorage.attemptId isn't a FK, so nothing cascades from the delete
+    // above — clean up B2 recordings/snapshots for this attempt. Best-effort:
+    // the attempt is already gone even if bucket cleanup fails.
+    try {
+      await deleteAttemptFiles(attemptId);
+    } catch (cleanupError) {
+      console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
+    }
 
     res.json({ message: 'Attempt deleted successfully' });
   } catch (error) {

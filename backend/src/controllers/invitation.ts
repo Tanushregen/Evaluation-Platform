@@ -11,6 +11,7 @@ import {
   resendInvitationForCandidate
 } from '../services/invitationService.js';
 import { buildSebConfigXml } from '../services/sebConfigService.js';
+import { deleteAttemptFiles } from '../services/fileStorageService.js';
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -340,6 +341,8 @@ export async function deleteTestInvitationCandidate(req: AuthenticatedRequest, r
       return;
     }
 
+    let attemptIds: string[] = [];
+
     await prisma.$transaction(async (tx) => {
       const candidate = await tx.candidate.findUnique({
         where: { email: invitation.email },
@@ -347,6 +350,15 @@ export async function deleteTestInvitationCandidate(req: AuthenticatedRequest, r
       });
 
       if (candidate) {
+        const attempts = await tx.testAttempt.findMany({
+          where: {
+            testId: invitation.testId,
+            candidateId: candidate.id
+          },
+          select: { id: true }
+        });
+        attemptIds = attempts.map((a) => a.id);
+
         await tx.testAttempt.deleteMany({
           where: {
             testId: invitation.testId,
@@ -359,6 +371,18 @@ export async function deleteTestInvitationCandidate(req: AuthenticatedRequest, r
         where: { id: invitation.id }
       });
     });
+
+    // FileStorage.attemptId isn't a FK, so nothing cascades from the attempt
+    // delete above — clean up B2 recordings/snapshots (and their metadata
+    // sidecars) for each removed attempt. Best-effort: candidate removal has
+    // already succeeded even if a bucket cleanup call fails.
+    for (const attemptId of attemptIds) {
+      try {
+        await deleteAttemptFiles(attemptId);
+      } catch (cleanupError) {
+        console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
+      }
+    }
 
     res.json({ message: 'Candidate removed from test successfully' });
   } catch (error) {
