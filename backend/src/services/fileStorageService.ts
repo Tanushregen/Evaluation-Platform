@@ -3,7 +3,14 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs/promises';
 import fsSync from 'fs';
-import { b2Configured, getAssessmentCandidateContext, getB2SignedUrl, putB2Object } from '../utils/b2Storage.js';
+import {
+  b2Configured,
+  deleteB2Object,
+  deleteB2ObjectsByPrefix,
+  getAssessmentCandidateContext,
+  getB2SignedUrl,
+  putB2Object,
+} from '../utils/b2Storage.js';
 
 const prisma = new PrismaClient();
 
@@ -855,6 +862,22 @@ export async function deleteFile(fileId: string): Promise<{ success: boolean; er
       return { success: true };
     }
 
+    const record = await prisma.fileStorage.findUnique({
+      where: { id: fileId },
+      select: { metadata: true },
+    });
+    if (record?.metadata) {
+      try {
+        const meta = JSON.parse(record.metadata) as { storageMode?: string; b2Key?: string };
+        if (meta.storageMode === 'b2' && meta.b2Key) {
+          await deleteB2Object(meta.b2Key);
+          await deleteB2Object(`${meta.b2Key}.json`);
+        }
+      } catch (b2Error) {
+        console.error(`Error deleting B2 object for file ${fileId}:`, b2Error);
+      }
+    }
+
     await prisma.fileStorage.delete({
       where: { id: fileId },
     });
@@ -885,11 +908,26 @@ export async function deleteFilesByReference(
       return { success: true, deletedCount: targets.length };
     }
 
+    const targets = await prisma.fileStorage.findMany({
+      where: { category, ...references },
+      select: { id: true, metadata: true },
+    });
+
+    for (const target of targets) {
+      if (!target.metadata) continue;
+      try {
+        const meta = JSON.parse(target.metadata) as { storageMode?: string; b2Key?: string };
+        if (meta.storageMode === 'b2' && meta.b2Key) {
+          await deleteB2Object(meta.b2Key);
+          await deleteB2Object(`${meta.b2Key}.json`);
+        }
+      } catch (b2Error) {
+        console.error(`Error deleting B2 object for file ${target.id}:`, b2Error);
+      }
+    }
+
     const result = await prisma.fileStorage.deleteMany({
-      where: {
-        category,
-        ...references,
-      },
+      where: { id: { in: targets.map((t) => t.id) } },
     });
     return { success: true, deletedCount: result.count };
   } catch (error) {
@@ -900,6 +938,32 @@ export async function deleteFilesByReference(
       error: error instanceof Error ? error.message : 'Failed to delete files',
     };
   }
+}
+
+/**
+ * Delete every stored file (recordings, snapshots, and their B2 folder) for a
+ * test attempt. FileStorage.attemptId is a plain string, not a FK, so nothing
+ * cascades when a TestAttempt is deleted — callers that remove an attempt or a
+ * candidate from a test must call this explicitly.
+ */
+export async function deleteAttemptFiles(attemptId: string): Promise<{ deletedCount: number }> {
+  let deletedCount = 0;
+
+  if (b2Configured()) {
+    try {
+      const context = await getAssessmentCandidateContext(attemptId);
+      if (context) {
+        deletedCount = await deleteB2ObjectsByPrefix(`${context.folder}/`);
+      }
+    } catch (error) {
+      console.error(`Error deleting B2 folder for attempt ${attemptId}:`, error);
+    }
+  }
+
+  const recordings = await deleteFilesByReference('recording', { attemptId });
+  const snapshots = await deleteFilesByReference('snapshot', { attemptId });
+
+  return { deletedCount: deletedCount || recordings.deletedCount + snapshots.deletedCount };
 }
 
 /**
@@ -1142,6 +1206,7 @@ export default {
   getFilesByReference,
   deleteFile,
   deleteFilesByReference,
+  deleteAttemptFiles,
   fileExists,
   validateFile,
   getMediaType,

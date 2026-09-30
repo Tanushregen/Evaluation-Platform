@@ -1,4 +1,11 @@
-import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import prisma from './db.js';
 
@@ -58,6 +65,46 @@ export async function putB2Object(key: string, body: Buffer, contentType: string
   await b2Client().send(
     new PutObjectCommand({ Bucket: env.bucket, Key: key, Body: body, ContentType: contentType }),
   );
+}
+
+export async function deleteB2Object(key: string): Promise<void> {
+  const env = b2Env();
+  if (!env) throw new Error('EGRESS_S3_* environment variables are not configured');
+  await b2Client().send(new DeleteObjectCommand({ Bucket: env.bucket, Key: key }));
+}
+
+// Deletes every object under a key prefix (e.g. a candidate's whole attempt
+// folder) — used when a candidate/attempt is removed so recordings, snapshots
+// and their .json sidecars don't linger in the bucket. Batches deletes in
+// groups of 1000 keys, the max S3 DeleteObjectsCommand accepts per call.
+export async function deleteB2ObjectsByPrefix(prefix: string): Promise<number> {
+  const env = b2Env();
+  if (!env) throw new Error('EGRESS_S3_* environment variables are not configured');
+
+  let deleted = 0;
+  let continuationToken: string | undefined;
+  do {
+    const listRes = await b2Client().send(
+      new ListObjectsV2Command({ Bucket: env.bucket, Prefix: prefix, ContinuationToken: continuationToken }),
+    );
+    const keys = (listRes.Contents ?? []).map((obj) => obj.Key).filter((key): key is string => !!key);
+
+    for (let i = 0; i < keys.length; i += 1000) {
+      const batch = keys.slice(i, i + 1000);
+      if (batch.length === 0) continue;
+      await b2Client().send(
+        new DeleteObjectsCommand({
+          Bucket: env.bucket,
+          Delete: { Objects: batch.map((Key) => ({ Key })) },
+        }),
+      );
+      deleted += batch.length;
+    }
+
+    continuationToken = listRes.IsTruncated ? listRes.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return deleted;
 }
 
 export async function getB2SignedUrl(
