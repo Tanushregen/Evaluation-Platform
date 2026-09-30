@@ -981,15 +981,15 @@ export async function deleteAttempt(req: AuthenticatedRequest, res: Response): P
       return;
     }
 
-    // Best-effort: the attempt delete has already succeeded even if bucket
-    // cleanup fails.
-    try {
-      await deleteAttemptFiles(attemptId);
-    } catch (cleanupError) {
-      console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
-    }
-
     res.json({ message: 'Attempt deleted successfully' });
+
+    // Fire-and-forget: B2 cleanup walks every version of every object under
+    // the attempt's folder, which can take a while for large recordings —
+    // don't make the UI wait on it. The attempt delete has already succeeded
+    // even if this fails.
+    deleteAttemptFiles(attemptId).catch((cleanupError) => {
+      console.error(`Error deleting B2 files for attempt ${attemptId}:`, cleanupError);
+    });
   } catch (error) {
     console.error('Delete attempt error:', error);
     res.status(500).json({ error: 'Internal server error' });

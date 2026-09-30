@@ -1,8 +1,8 @@
 import {
-  DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   ListObjectsV2Command,
+  ListObjectVersionsCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -67,44 +67,69 @@ export async function putB2Object(key: string, body: Buffer, contentType: string
   );
 }
 
+// Backblaze B2 buckets keep every prior version of a file by default. A plain
+// DeleteObject call (no VersionId) doesn't free that storage — it just hides
+// the current version and adds a delete marker, so a "deleted" file keeps
+// showing up in Browse Files (with a * marking hidden versions) and keeps
+// counting against usage. ListObjectVersionsCommand + deleting each
+// Key/VersionId pair removes every version (and delete markers) outright,
+// regardless of the bucket's lifecycle settings.
+async function listAllVersions(
+  env: B2Config,
+  prefix: string,
+): Promise<Array<{ Key: string; VersionId?: string }>> {
+  const targets: Array<{ Key: string; VersionId?: string }> = [];
+  let keyMarker: string | undefined;
+  let versionIdMarker: string | undefined;
+  do {
+    const res = await b2Client().send(
+      new ListObjectVersionsCommand({
+        Bucket: env.bucket,
+        Prefix: prefix,
+        KeyMarker: keyMarker,
+        VersionIdMarker: versionIdMarker,
+      }),
+    );
+    for (const v of [...(res.Versions ?? []), ...(res.DeleteMarkers ?? [])]) {
+      if (v.Key) targets.push({ Key: v.Key, VersionId: v.VersionId });
+    }
+    keyMarker = res.IsTruncated ? res.NextKeyMarker : undefined;
+    versionIdMarker = res.IsTruncated ? res.NextVersionIdMarker : undefined;
+  } while (keyMarker);
+  return targets;
+}
+
+async function deleteVersionedTargets(
+  env: B2Config,
+  targets: Array<{ Key: string; VersionId?: string }>,
+): Promise<number> {
+  let deleted = 0;
+  for (let i = 0; i < targets.length; i += 1000) {
+    const batch = targets.slice(i, i + 1000);
+    if (batch.length === 0) continue;
+    await b2Client().send(new DeleteObjectsCommand({ Bucket: env.bucket, Delete: { Objects: batch } }));
+    deleted += batch.length;
+  }
+  return deleted;
+}
+
 export async function deleteB2Object(key: string): Promise<void> {
   const env = b2Env();
   if (!env) throw new Error('EGRESS_S3_* environment variables are not configured');
-  await b2Client().send(new DeleteObjectCommand({ Bucket: env.bucket, Key: key }));
+  const targets = (await listAllVersions(env, key)).filter((t) => t.Key === key);
+  await deleteVersionedTargets(env, targets);
 }
 
-// Deletes every object under a key prefix (e.g. a candidate's whole attempt
-// folder) — used when a candidate/attempt is removed so recordings, snapshots
-// and their .json sidecars don't linger in the bucket. Batches deletes in
-// groups of 1000 keys, the max S3 DeleteObjectsCommand accepts per call.
+// Permanently deletes every version of every object under a key prefix (e.g.
+// a candidate's whole attempt folder) — used when a candidate/attempt is
+// removed so recordings, snapshots and their .json sidecars don't linger in
+// the bucket. Batches deletes in groups of 1000, the max DeleteObjectsCommand
+// accepts per call.
 export async function deleteB2ObjectsByPrefix(prefix: string): Promise<number> {
   const env = b2Env();
   if (!env) throw new Error('EGRESS_S3_* environment variables are not configured');
-
-  let deleted = 0;
-  let continuationToken: string | undefined;
-  do {
-    const listRes = await b2Client().send(
-      new ListObjectsV2Command({ Bucket: env.bucket, Prefix: prefix, ContinuationToken: continuationToken }),
-    );
-    const keys = (listRes.Contents ?? []).map((obj) => obj.Key).filter((key): key is string => !!key);
-
-    for (let i = 0; i < keys.length; i += 1000) {
-      const batch = keys.slice(i, i + 1000);
-      if (batch.length === 0) continue;
-      await b2Client().send(
-        new DeleteObjectsCommand({
-          Bucket: env.bucket,
-          Delete: { Objects: batch.map((Key) => ({ Key })) },
-        }),
-      );
-      deleted += batch.length;
-    }
-
-    continuationToken = listRes.IsTruncated ? listRes.NextContinuationToken : undefined;
-  } while (continuationToken);
-
-  return deleted;
+  const targets = await listAllVersions(env, prefix);
+  return deleteVersionedTargets(env, targets);
 }
 
 export async function getB2SignedUrl(
