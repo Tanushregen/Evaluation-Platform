@@ -691,19 +691,19 @@ export const submitAnalysis = async (req: Request, res: Response): Promise<void>
     let pythonResult: Awaited<ReturnType<typeof analyzeFrameWithPythonForSession>> = null;
     const hasClientVisionResult = !useServerVision && Array.isArray(analysisData.clientViolations);
 
-    // Which detection path this cycle actually resolves to — logged unconditionally,
-    // every cycle, regardless of PROCTOR_TRACE, so PM2 logs (`pm2 logs backend`)
-    // always show whether SEB sessions are really running client-side
-    // (onnxruntime-web/YOLO + MediaPipe) detection as intended, or falling back to
-    // python_cv_service, and why (see clientVisionError, set by useProctoring.ts
-    // when client-side inference throws).
-    const resolvedSource = hasClientVisionResult ? 'client' : analysisData.frameData ? 'server_fallback' : 'none';
-    console.log(
-      `[PROCTOR_DETECTION_SOURCE] session=${sessionId} assessmentMode=${session.attempt.test.assessmentMode} ` +
-      `resolvedSource=${resolvedSource} useServerVision=${useServerVision} ` +
-      `clientViolationCount=${analysisData.clientViolations?.length ?? 0}` +
-      (analysisData.clientVisionError ? ` clientVisionError=${JSON.stringify(analysisData.clientVisionError)}` : '')
-    );
+    // Which detection path this cycle actually resolves to — logged unconditionally
+    // (every cycle, not just when a violation is found) so PM2 logs can confirm
+    // whether SEB sessions are really running client-side (onnxruntime-web/YOLO +
+    // MediaPipe) detection as intended, or silently falling back to python_cv_service
+    // every cycle instead. Requires PROCTOR_TRACE=true (see proctorTrace above).
+    proctorTrace('detection_source', {
+      sessionId,
+      assessmentMode: session.attempt.test.assessmentMode,
+      useServerVision,
+      hasClientVisionResult,
+      clientViolationCount: analysisData.clientViolations?.length ?? 0,
+      resolvedSource: hasClientVisionResult ? 'client' : analysisData.frameData ? 'server_fallback' : 'none',
+    });
 
     proctorTrace('local_analysis', {
       sessionId,

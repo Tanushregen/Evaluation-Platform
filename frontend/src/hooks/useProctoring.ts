@@ -191,9 +191,9 @@ export function useProctoring(attemptId: string, config: Partial<ProctorConfig> 
     clearStreak: 0,
   });
 
-  const analysisIntervalMs = Number((import.meta as any).env?.VITE_PROCTOR_ANALYSIS_INTERVAL_MS || 2000);
-  // How often a webcam frame is actually captured+uploaded during the analysis
-  // loop when client-side detection is healthy and finds nothing —
+  const analysisIntervalMs = Number((import.meta as any).env?.VITE_PROCTOR_ANALYSIS_INTERVAL_MS || 1000);
+  // How often a webcam frame is actually captured+uploaded during the 1s
+  // analysis loop when client-side detection is healthy and finds nothing —
   // see runSnapshotAnalysis. Kept comfortably under the backend's evidence
   // cache TTL (PROCTOR_EVIDENCE_FRAME_TTL_MS, default 30000ms in
   // proctoring.ts) so a violation from a non-vision signal (tab switch,
@@ -992,7 +992,6 @@ export function useProctoring(attemptId: string, config: Partial<ProctorConfig> 
     try {
       let clientViolations: ReturnType<typeof detectionsToViolations> | undefined;
       let faceMeshSignal: FaceMeshSignal | null = null;
-      let clientVisionErrorMessage: string | undefined;
       if (session.detectionMode === 'client' && !forceServerDetection) {
         try {
           const activeVideo = getActiveVideoElement();
@@ -1012,22 +1011,8 @@ export function useProctoring(attemptId: string, config: Partial<ProctorConfig> 
               });
             }
 
-            let clientSession;
-            try {
-              clientSession = await loadClientVisionModel();
-            } catch (modelLoadError) {
-              const message = modelLoadError instanceof Error ? modelLoadError.message : 'unknown';
-              throw new Error(`model_load_failed: ${message}`);
-            }
-
-            let detections;
-            try {
-              detections = await runClientDetection(clientSession, activeVideo);
-            } catch (inferenceError) {
-              const message = inferenceError instanceof Error ? inferenceError.message : 'unknown';
-              throw new Error(`inference_failed: ${message}`);
-            }
-
+            const clientSession = await loadClientVisionModel();
+            const detections = await runClientDetection(clientSession, activeVideo);
             clientViolations = detectionsToViolations(detections, faceMeshSignal);
             traceLog('client_vision_detection', {
               sessionId: session.sessionId,
@@ -1037,28 +1022,14 @@ export function useProctoring(attemptId: string, config: Partial<ProctorConfig> 
               faceMeshFaceCount: faceMeshSignal?.faceCount,
               faceMeshGaze: faceMeshSignal?.gazeDirection,
             });
-          } else {
-            // No video element with usable dimensions yet (camera stream not
-            // attached/ready this cycle) — clientViolations stays undefined
-            // and this cycle falls back to the server with no exception ever
-            // thrown, which previously showed up indistinguishable from a
-            // real model failure. Surfaced explicitly so `pm2 logs backend`
-            // can tell "camera not ready" apart from "model load/inference
-            // failed" (see clientVisionErrorMessage below).
-            clientVisionErrorMessage = 'no_active_video_element';
-            traceLog('client_vision_no_video', { sessionId: session.sessionId });
           }
         } catch (clientVisionError) {
         // Model failed to load or infer this cycle — leave clientViolations
         // undefined so the backend's own python_cv_service fallback covers
-        // this cycle instead of proctoring silently going dark. The message
-        // is also sent to the backend (clientVisionErrorMessage below) so
-        // the reason is visible in `pm2 logs backend` instead of only the
-        // browser console.
-          clientVisionErrorMessage = clientVisionError instanceof Error ? clientVisionError.message : 'unknown';
+        // this cycle instead of proctoring silently going dark.
           traceLog('client_vision_error', {
             sessionId: session.sessionId,
-            message: clientVisionErrorMessage,
+            message: clientVisionError instanceof Error ? clientVisionError.message : 'unknown',
           });
         }
       }
@@ -1097,7 +1068,6 @@ export function useProctoring(attemptId: string, config: Partial<ProctorConfig> 
           frameData: frameData || undefined,
           ...(audioResult ? { audio: audioResult } : {}),
           ...(clientViolations ? { clientViolations } : {}),
-          ...(clientVisionErrorMessage ? { clientVisionError: clientVisionErrorMessage } : {}),
           // Gaze telemetry for the observer dashboard. This is the same shape
           // the backend used to get back from python_cv_service's MediaPipe
           // pass; it now comes from the in-browser landmarker instead.

@@ -27,5 +27,3 @@ Thumbs.db
 # Runtime upload/storage artifacts
 backend/storage/meta/*.json
 backend/storage/objects/*
-python_cv_service/*.mp4
-backend/.env.save

@@ -1541,19 +1541,6 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
       console.log(`[SCREEN_SHARE_DIAGNOSTICS] stage=precheck attempt=${attemptId}`, JSON.stringify(normalizedEventData));
     }
 
-    // clientDetectionReadiness.ts's pre-exam check (onnxruntime-web + MediaPipe
-    // model priming). Was only ever written to the activityLog table — never
-    // printed anywhere, so the failureReason it captures (see
-    // ClientDetectionReadinessResult) was invisible in `pm2 logs backend`
-    // without a manual DB query. Grep MODEL_PRIMING_DIAGNOSTICS to see whether
-    // a given SEB session's clientReady was false, and if so, whether it was
-    // the vision model, faceMesh model, or both, and why (timeout vs immediate
-    // throw — e.g. WASM/CORS/isolation issues surface here as an immediate
-    // throw with a message, a slow/blocked asset as a timeout).
-    if (normalizedEventType === 'model_priming_diagnostics') {
-      console.log(`[MODEL_PRIMING_DIAGNOSTICS] attempt=${attemptId}`, JSON.stringify(normalizedEventData));
-    }
-
     emitToTestProctorRoom(testId, 'activity-update', {
       testId,
         attemptId,
