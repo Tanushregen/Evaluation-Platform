@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import Editor from '@monaco-editor/react';
@@ -115,6 +115,10 @@ export default function TestInterface() {
   // the panel is only ever a deliberate click on the bubble/toast.
   const [proctorToastMessage, setProctorToastMessage] = useState<{ id: string; text: string; at: number } | null>(null);
   const [proctorReplyText, setProctorReplyText] = useState('');
+  // Drag position (top-left corner, viewport px) for the proctor chat widget.
+  // Null means "use the default top-right anchor" — set only once the
+  // candidate actually drags it somewhere.
+  const [chatPos, setChatPos] = useState<{ left: number; top: number } | null>(null);
   // New state for redesigned UI
   const [markedForReview, setMarkedForReview] = useState<Set<number>>(new Set());
   const [autoSaved, setAutoSaved] = useState(false);
@@ -294,6 +298,91 @@ export default function TestInterface() {
     setProctorToastMessage(null);
     setProctorChatOpen(true);
   };
+
+  // Dragging the proctor chat widget: pointer handlers live on whichever
+  // element is the current "handle" (the bubble/toast button, or the open
+  // panel's header bar) so dragging never fights with the message list
+  // scrolling or the reply input/send button inside the open panel.
+  const chatWidgetRef = useRef<HTMLDivElement | null>(null);
+  const chatDragStateRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startLeft: number;
+    startTop: number;
+    moved: boolean;
+  } | null>(null);
+  // Set right before the resulting click fires, so the handle's onClick can
+  // skip acting on a drag instead of a tap -- pointerup fires before click.
+  const chatJustDraggedRef = useRef(false);
+
+  const clampChatPos = (left: number, top: number) => {
+    const el = chatWidgetRef.current;
+    const width = el?.offsetWidth ?? 56;
+    const height = el?.offsetHeight ?? 56;
+    const maxLeft = Math.max(8, window.innerWidth - width - 8);
+    const maxTop = Math.max(8, window.innerHeight - height - 8);
+    return { left: Math.min(Math.max(left, 8), maxLeft), top: Math.min(Math.max(top, 8), maxTop) };
+  };
+
+  const handleChatDragPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    const el = chatWidgetRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    chatDragStateRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleChatDragPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = chatDragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startClientX;
+    const dy = event.clientY - drag.startClientY;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    drag.moved = true;
+    setChatPos(clampChatPos(drag.startLeft + dx, drag.startTop + dy));
+  };
+
+  const handleChatDragPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = chatDragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (drag.moved) chatJustDraggedRef.current = true;
+    chatDragStateRef.current = null;
+  };
+
+  // Wrap a handle's click handler so a drag-release doesn't also open/close it.
+  const guardChatClick = (handler: () => void) => () => {
+    if (chatJustDraggedRef.current) {
+      chatJustDraggedRef.current = false;
+      return;
+    }
+    handler();
+  };
+
+  // Re-clamp into the viewport after the widget's size changes (bubble ->
+  // toast -> full panel are very different sizes) and after the window resizes.
+  useEffect(() => {
+    if (!chatPos) return;
+    const id = requestAnimationFrame(() => {
+      setChatPos((current) => (current ? clampChatPos(current.left, current.top) : current));
+    });
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proctorChatOpen, proctorToastMessage, proctorMessages.length]);
+
+  useEffect(() => {
+    const onResize = () => setChatPos((current) => (current ? clampChatPos(current.left, current.top) : current));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // Auto-dismiss the single-message toast back to the plain bubble icon.
   useEffect(() => {
@@ -1129,14 +1218,26 @@ export default function TestInterface() {
           shows only that single message as a brief toast (not the whole
           thread/panel) and auto-dismisses back to the bubble after 6s.
           Replying is only reachable by tapping the bubble/toast to open the
-          full panel, which itself auto-collapses after 6s idle. */}
+          full panel, which itself auto-collapses after 6s idle. The whole
+          widget is draggable anywhere on screen -- see chatPos/handleChatDrag*
+          above -- via the bubble/toast itself or the open panel's header bar,
+          so it never fights with scrolling the thread or using the reply box. */}
       {proctorMessages.length > 0 && (
-        <div className="fixed top-16 right-4 z-50">
+        <div
+          ref={chatWidgetRef}
+          className="fixed z-50"
+          style={chatPos ? { left: `${chatPos.left}px`, top: `${chatPos.top}px` } : { top: '4rem', right: '1rem' }}
+        >
           {proctorChatOpen ? (
             <div className="w-[calc(100vw-2rem)] max-w-sm overflow-hidden rounded-xl bg-indigo-600 text-white shadow-2xl ring-1 ring-black/10 sm:w-96">
               <button
                 type="button"
-                onClick={() => setProctorChatOpen(false)}
+                onClick={guardChatClick(() => setProctorChatOpen(false))}
+                onPointerDown={handleChatDragPointerDown}
+                onPointerMove={handleChatDragPointerMove}
+                onPointerUp={handleChatDragPointerUp}
+                onPointerCancel={handleChatDragPointerUp}
+                style={{ touchAction: 'none', cursor: 'grab' }}
                 className="flex w-full items-center justify-between bg-indigo-700 px-4 py-2"
               >
                 <span className="text-xs font-bold uppercase tracking-wide">Message from Invigilator</span>
@@ -1186,7 +1287,12 @@ export default function TestInterface() {
           ) : proctorToastMessage ? (
             <button
               type="button"
-              onClick={openProctorChat}
+              onClick={guardChatClick(openProctorChat)}
+              onPointerDown={handleChatDragPointerDown}
+              onPointerMove={handleChatDragPointerMove}
+              onPointerUp={handleChatDragPointerUp}
+              onPointerCancel={handleChatDragPointerUp}
+              style={{ touchAction: 'none', cursor: 'grab' }}
               aria-label="Open message from invigilator"
               className="flex max-w-xs items-start gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-left text-white shadow-2xl ring-1 ring-black/10 hover:bg-indigo-700"
             >
@@ -1203,7 +1309,12 @@ export default function TestInterface() {
           ) : (
             <button
               type="button"
-              onClick={openProctorChat}
+              onClick={guardChatClick(openProctorChat)}
+              onPointerDown={handleChatDragPointerDown}
+              onPointerMove={handleChatDragPointerMove}
+              onPointerUp={handleChatDragPointerUp}
+              onPointerCancel={handleChatDragPointerUp}
+              style={{ touchAction: 'none', cursor: 'grab' }}
               aria-label="Open message from invigilator"
               title="Message from invigilator"
               className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-2xl ring-1 ring-black/10 transition-transform hover:scale-105 hover:bg-indigo-700"
