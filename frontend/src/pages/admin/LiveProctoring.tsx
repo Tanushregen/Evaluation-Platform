@@ -57,10 +57,12 @@ function trustColor(score: number) {
 function CandidateVideo({
   attemptId,
   active,
+  muteAudio,
   onRoom,
 }: {
   attemptId?: string;
   active: boolean;
+  muteAudio?: boolean;
   onRoom?: (room: Room | null) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -156,7 +158,7 @@ function CandidateVideo({
           backgroundColor: '#020617',
         }}
       />
-      <audio ref={audioRef} autoPlay />
+      <audio ref={audioRef} autoPlay muted={muteAudio} />
       {status !== 'connected' && (
         <div
           style={{
@@ -405,7 +407,7 @@ function GridTile({
         flexShrink: 0,
       }}
     >
-      <CandidateVideo attemptId={candidate.attemptId} active onRoom={onRoom} />
+      <CandidateVideo attemptId={candidate.attemptId} active muteAudio onRoom={onRoom} />
 
       <div
         style={{
