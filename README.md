@@ -372,3 +372,56 @@ npm run dev
 ## License
 
 MIT
+
+## Troubleshooting: nginx serving `.mjs` with the wrong MIME type
+
+If client-side proctoring fails to initialize with a browser console error like:
+
+```
+TypeError: Failed to fetch dynamically imported module: .../ort-wasm-simd-threaded.jsep.mjs
+```
+
+nginx's default `mime.types` only maps `.js` to `application/javascript`, not `.mjs`. It then serves `.mjs` files as `application/octet-stream`, which browsers (including SEB's embedded Chromium) refuse to execute as a JS module under strict MIME-type checking.
+
+**Confirm it**, on the server:
+
+```bash
+grep -n 'mjs' /etc/nginx/mime.types
+curl -sI https://<your-domain>/ort/ort-wasm-simd-threaded.jsep.mjs
+# Content-Type: application/octet-stream  <- confirms the bug
+```
+
+**Fix** — add `.mjs` alongside `.js` in the `application/javascript` mapping:
+
+```bash
+sudo sed -i '/application\/javascript.*\bjs\b/s/js;/js mjs;/' /etc/nginx/mime.types
+grep -n 'mjs' /etc/nginx/mime.types   # should now show: application/javascript ... js mjs;
+```
+
+If the `sed` doesn't match (formatting varies by nginx build), edit manually instead:
+
+```bash
+sudo nano /etc/nginx/mime.types
+```
+
+Change:
+
+```
+application/javascript                          js;
+```
+
+to:
+
+```
+application/javascript                          js mjs;
+```
+
+**Reload nginx and re-verify:**
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+curl -sI https://<your-domain>/ort/ort-wasm-simd-threaded.jsep.mjs
+# Content-Type: application/javascript  <- fixed
+```
+
+This fix applies to every `.mjs` file nginx serves for the app, not just this one path.
