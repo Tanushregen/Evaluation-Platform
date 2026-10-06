@@ -5,13 +5,28 @@ import { toast } from 'react-hot-toast';
 import { adminApi } from '../../services/api';
 import { TestAttempt } from '../../types';
 import { violationLabel } from '../../utils/violationLabels';
-import { FileDown, Mail, ChevronLeft, ChevronRight, XCircle, CheckCircle2, AlertTriangle, Trash2, Send, Clock, RotateCcw, Ban } from 'lucide-react';
+import { FileDown, Mail, ChevronLeft, ChevronRight, XCircle, CheckCircle2, AlertTriangle, Trash2, Send, Clock, RotateCcw, Ban, Sparkles } from 'lucide-react';
 import Icon from '../../components/Icon';
 import CustomSelect from '../../components/CustomSelect';
 
 /* -- Ban (violation) reason modal -- */
 function BanModal({ candidateName, onConfirm, onCancel }: { candidateName: string; onConfirm: (reason: string) => void; onCancel: () => void }) {
   const [reason, setReason] = useState('');
+  const [rephrasing, setRephrasing] = useState(false);
+
+  const handleRephrase = async () => {
+    if (!reason.trim() || rephrasing) return;
+    setRephrasing(true);
+    try {
+      const { data } = await adminApi.rephraseViolationReason(reason.trim());
+      if (data?.reason) setReason(data.reason);
+    } catch {
+      toast.error('Could not rephrase — you can still type it yourself');
+    } finally {
+      setRephrasing(false);
+    }
+  };
+
   return (
     <div style={{
       position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 50,
@@ -25,7 +40,7 @@ function BanModal({ candidateName, onConfirm, onCancel }: { candidateName: strin
         <textarea
           value={reason}
           onChange={e => setReason(e.target.value)}
-          placeholder="e.g. Multiple people visible on camera, reading answers from a second device..."
+          placeholder="e.g. 2nd phone visible, kept looking down, talking to someone off screen..."
           rows={3}
           autoFocus
           style={{
@@ -33,6 +48,17 @@ function BanModal({ candidateName, onConfirm, onCancel }: { candidateName: strin
             fontSize: '13px', color: '#374151', outline: 'none', boxSizing: 'border-box', backgroundColor: 'white',
           }}
         />
+        <button type="button" onClick={() => void handleRephrase()} disabled={!reason.trim() || rephrasing}
+          title="Rewrite your note as one clean, professional sentence"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '8px',
+            padding: '5px 10px', borderRadius: '7px', border: '1px solid #DDD6FE', backgroundColor: '#F5F3FF',
+            fontSize: '12px', fontWeight: 600, color: reason.trim() && !rephrasing ? '#7C3AED' : '#C4B5FD',
+            cursor: reason.trim() && !rephrasing ? 'pointer' : 'not-allowed',
+          }}>
+          <Sparkles size={12} />
+          {rephrasing ? 'Rephrasing…' : 'Rephrase with AI'}
+        </button>
         <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
           <button onClick={onCancel}
             style={{ flex: 1, padding: '9px', borderRadius: '8px', border: '1.5px solid var(--admin-border)', backgroundColor: 'white', fontSize: '13px', fontWeight: 500, color: '#374151', cursor: 'pointer' }}>

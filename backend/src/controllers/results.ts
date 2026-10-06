@@ -16,6 +16,7 @@ import { performSubmission } from './candidate.js';
 import { reconcileCandidateEgressRecording } from '../services/liveKitEgressService.js';
 import { deleteAttemptFiles } from '../services/fileStorageService.js';
 import { getAssessmentCandidateContext } from '../utils/b2Storage.js';
+import { callLLM } from '../services/llmService.js';
 
 async function resolveCompanyName(companyId: string | null): Promise<string> {
   if (!companyId) return 'Our Team';
@@ -993,6 +994,45 @@ export async function deleteAttempt(req: AuthenticatedRequest, res: Response): P
   } catch (error) {
     console.error('Delete attempt error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+// Lets an invigilator type a rough, shorthand note of what they observed (e.g. "2nd phone,
+// kept looking down, talked to someone off screen") in the Ban modal and have it rewritten
+// into one clean, professional sentence before it goes into the ban email and the audit
+// trail. Purely an authoring aid — the admin can still edit the result before submitting,
+// and a failure here never blocks the ban action itself (caller falls back to the raw text).
+export async function rephraseViolationReason(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const { text } = req.body as { text?: string };
+
+    if (typeof text !== 'string' || !text.trim()) {
+      res.status(400).json({ error: 'text is required' });
+      return;
+    }
+    if (text.length > 2000) {
+      res.status(400).json({ error: 'text is too long' });
+      return;
+    }
+
+    const response = await callLLM([
+      {
+        role: 'system',
+        content: 'You help test proctoring invigilators write a violation reason for a candidate who is being banned for cheating. Rewrite the admin\'s rough note as exactly ONE clear, professional sentence suitable for a formal email to the candidate and an audit log. Keep every factual detail the admin mentioned — do not invent or omit anything. Do not add a greeting, explanation, or quotation marks. Respond with only the rewritten sentence, nothing else.'
+      },
+      { role: 'user', content: text.trim() }
+    ], { temperature: 0.3, maxTokens: 150 });
+
+    const reason = response.content.trim().replace(/^["']|["']$/g, '');
+    if (!reason) {
+      res.status(500).json({ error: 'Failed to generate a reason' });
+      return;
+    }
+
+    res.json({ reason });
+  } catch (error) {
+    console.error('Rephrase violation reason error:', error);
+    res.status(500).json({ error: 'Failed to generate a reason' });
   }
 }
 

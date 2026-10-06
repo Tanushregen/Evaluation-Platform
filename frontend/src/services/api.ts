@@ -500,6 +500,9 @@ export const adminApi = {
   forceSubmitAttempt: (attemptId: string, options?: { banned?: boolean; violationReason?: string }) =>
     api.post(`/admin/attempts/${attemptId}/force-submit`, options ?? {}),
 
+  rephraseViolationReason: (text: string) =>
+    api.post<{ reason: string }>('/admin/violation-reason/rephrase', { text }),
+
   // Agent API - AI-powered test generation
   analyzeJob: (jobTitle: string, jobDescription?: string, experience?: string) =>
     api.post('/admin/agent/analyze-job', { jobTitle, jobDescription, experience }),
