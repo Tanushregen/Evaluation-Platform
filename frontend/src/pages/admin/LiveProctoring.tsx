@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import {
   AlertTriangle,
+  Ban,
   ChevronDown,
   Clock,
   Eye,
@@ -52,6 +54,51 @@ function trustColor(score: number) {
   if (score >= 80) return '#059669';
   if (score >= 65) return '#D97706';
   return '#E11D48';
+}
+
+/* -- Ban (violation) reason modal — force-submits the attempt and emails the
+   candidate the violation/ban notice (Settings > Email > Violation / Ban Email). -- */
+function BanModal({ candidateName, submitting, onConfirm, onCancel }: {
+  candidateName: string;
+  submitting: boolean;
+  onConfirm: (reason: string) => void;
+  onCancel: () => void;
+}) {
+  const [reason, setReason] = useState('');
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 200,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{ backgroundColor: 'white', borderRadius: '14px', padding: '28px', width: '420px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: '0 0 8px' }}>Ban {candidateName}</h3>
+        <p style={{ fontSize: '13px', color: '#6B7280', margin: '0 0 16px' }}>
+          This force-submits their attempt right now and emails them the violation/ban notice. Describe the violation you observed.
+        </p>
+        <textarea
+          value={reason}
+          onChange={e => setReason(e.target.value)}
+          placeholder="e.g. Multiple people visible on camera, reading answers from a second device..."
+          rows={3}
+          autoFocus
+          style={{
+            width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid #E5E7EB',
+            fontSize: '13px', color: '#374151', outline: 'none', boxSizing: 'border-box', backgroundColor: 'white',
+          }}
+        />
+        <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+          <button onClick={onCancel} disabled={submitting}
+            style={{ flex: 1, padding: '9px', borderRadius: '8px', border: '1.5px solid #E5E7EB', backgroundColor: 'white', fontSize: '13px', fontWeight: 500, color: '#374151', cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button onClick={() => onConfirm(reason.trim())} disabled={!reason.trim() || submitting}
+            style={{ flex: 1, padding: '9px', borderRadius: '8px', border: 'none', backgroundColor: reason.trim() && !submitting ? '#DC2626' : '#FCA5A5', fontSize: '13px', fontWeight: 600, color: 'white', cursor: reason.trim() && !submitting ? 'pointer' : 'not-allowed' }}>
+            {submitting ? 'Banning…' : 'Submit & Ban'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function CandidateVideo({
@@ -184,10 +231,14 @@ function LiveTile({
   candidate,
   selected,
   onSelect,
+  onBan,
+  banning,
 }: {
   candidate: LiveCandidate;
   selected: boolean;
   onSelect: () => void;
+  onBan?: () => void;
+  banning?: boolean;
 }) {
   return (
     <div
@@ -349,6 +400,31 @@ function LiveTile({
             trust
           </p>
         </div>
+        {onBan && (
+          <button
+            type="button"
+            title="Ban for violation — force-submit and email them a ban notice"
+            aria-label="Ban candidate"
+            onClick={onBan}
+            disabled={banning}
+            style={{
+              width: '34px',
+              height: '34px',
+              borderRadius: '9px',
+              border: '1px solid #FCA5A5',
+              backgroundColor: 'white',
+              color: '#DC2626',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              cursor: banning ? 'default' : 'pointer',
+              opacity: banning ? 0.5 : 1,
+            }}
+          >
+            <Ban size={15} />
+          </button>
+        )}
         <button
           type="button"
           title="Preview session"
@@ -379,11 +455,15 @@ function GridTile({
   isSelected,
   onRoom,
   onSelectChat,
+  onBan,
+  banning,
 }: {
   candidate: LiveCandidate;
   isSelected: boolean;
   onRoom: (room: Room | null) => void;
   onSelectChat: () => void;
+  onBan?: () => void;
+  banning?: boolean;
 }) {
   return (
     <button
@@ -435,7 +515,7 @@ function GridTile({
           style={{
             position: 'absolute',
             top: '8px',
-            right: '8px',
+            right: onBan ? '38px' : '8px',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -448,6 +528,33 @@ function GridTile({
         >
           <AlertTriangle size={12} />
         </span>
+      )}
+
+      {onBan && (
+        <button
+          type="button"
+          title="Ban for violation — force-submit and email them a ban notice"
+          aria-label="Ban candidate"
+          onClick={(e) => { e.stopPropagation(); onBan(); }}
+          disabled={banning}
+          style={{
+            position: 'absolute',
+            top: '8px',
+            right: '8px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '22px',
+            height: '22px',
+            borderRadius: '50%',
+            border: 'none',
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            color: banning ? '#6B7280' : '#F87171',
+            cursor: banning ? 'default' : 'pointer',
+          }}
+        >
+          <Ban size={12} />
+        </button>
       )}
 
       <div
@@ -827,6 +934,8 @@ export default function LiveProctoring() {
   const [testMenuOpen, setTestMenuOpen] = useState(false);
   const [viewerRoom, setViewerRoom] = useState<Room | null>(null);
   const [messageText, setMessageText] = useState('');
+  const [banModalFor, setBanModalFor] = useState<{ attemptId: string; name: string } | null>(null);
+  const [banningId, setBanningId] = useState<string | null>(null);
   // Keyed by attemptId so closing and reopening the popup for the same candidate
   // keeps their thread; history lives only for this page session (until refresh/nav away).
   const [chatMessagesByAttempt, setChatMessagesByAttempt] = useState<
@@ -1045,6 +1154,24 @@ export default function LiveProctoring() {
       clearInterval(interval);
     };
   }, [testId]);
+
+  const handleBanCandidate = async (reason: string) => {
+    if (!banModalFor) return;
+    const { attemptId, name } = banModalFor;
+    setBanningId(attemptId);
+    try {
+      await adminApi.forceSubmitAttempt(attemptId, { banned: true, violationReason: reason });
+      toast.success(`${name} has been banned and notified by email`);
+      setBanModalFor(null);
+      // Optimistically drop them from the live list — the 10s poll will confirm it,
+      // but no reason to wait that long once the submit has already succeeded.
+      setLiveCandidates((prev) => prev.filter((c) => c.attemptId !== attemptId));
+    } catch {
+      toast.error('Failed to ban candidate');
+    } finally {
+      setBanningId(null);
+    }
+  };
 
   const testOptions = Array.from(
     liveCandidates.reduce((map, candidate) => {
@@ -1306,6 +1433,8 @@ export default function LiveProctoring() {
                 setSelectedAttemptId(candidate.attemptId);
                 setViewerCandidate(candidate);
               }}
+              onBan={candidate.attemptId ? () => setBanModalFor({ attemptId: candidate.attemptId!, name: candidate.name }) : undefined}
+              banning={Boolean(candidate.attemptId) && banningId === candidate.attemptId}
             />
           ))}
         </div>
@@ -1656,6 +1785,8 @@ export default function LiveProctoring() {
                       isSelected={gridChatAttemptId === candidate.attemptId}
                       onRoom={(room) => handleGridTileRoom(candidate.attemptId, room)}
                       onSelectChat={() => setGridChatAttemptId(candidate.attemptId)}
+                      onBan={() => setBanModalFor({ attemptId: candidate.attemptId, name: candidate.name })}
+                      banning={banningId === candidate.attemptId}
                     />
                   ))
               ) : (
@@ -1852,6 +1983,15 @@ export default function LiveProctoring() {
             </div>
           </div>
         </div>
+      )}
+
+      {banModalFor && (
+        <BanModal
+          candidateName={banModalFor.name}
+          submitting={banningId === banModalFor.attemptId}
+          onConfirm={reason => void handleBanCandidate(reason)}
+          onCancel={() => setBanModalFor(null)}
+        />
       )}
     </div>
   );
