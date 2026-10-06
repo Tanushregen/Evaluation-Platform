@@ -20,7 +20,7 @@ import {
   filterViolationsForAssessmentMode,
 } from '../utils/proctoringConfig.js';
 import { sendCandidateScoreWebhook, dispatchCompanyWebhookEvent } from '../services/candidateScoreWebhookService.js';
-import { sendConfirmationEmail, sendResultEmail } from '../services/emailService.js';
+import { sendConfirmationEmail, sendResultEmail, sendBanEmail } from '../services/emailService.js';
 import { saveNotification, ensureNotificationTable } from './notifications.js';
 import { getTestGradingPreferences } from '../utils/testPreferences.js';
 import { canStoreViolationNow } from './proctoring.js';
@@ -1781,7 +1781,7 @@ export type SubmissionOutcome =
 // autoSubmitExpiredAttempts in services/testExpiryService.ts), and the admin-triggered force-submit
 // (results.ts's forceSubmitAttempt) so all three paths grade and finalize an attempt identically,
 // regardless of who triggered the submit.
-export async function performSubmission(attemptId: string, testId: string, autoSubmit: boolean, reason?: string): Promise<SubmissionOutcome> {
+export async function performSubmission(attemptId: string, testId: string, autoSubmit: boolean, reason?: string, banReason?: string): Promise<SubmissionOutcome> {
     // Batch fetch: attempt with answers, test with questions - single DB round trip
     const [attempt, test] = await Promise.all([
       prisma.testAttempt.findUnique({
@@ -1999,7 +1999,8 @@ export async function performSubmission(attemptId: string, testId: string, autoS
           endTime: new Date(),
           submittedAt: new Date(),
           score: totalScore,
-          resultReleased
+          resultReleased,
+          ...(banReason ? { banned: true, banReason, bannedAt: new Date() } : {})
         }
       }),
       // Log submission
@@ -2083,13 +2084,15 @@ export async function performSubmission(attemptId: string, testId: string, autoS
       result: webhookResult,
     });
 
-    // Send confirmation email — fire-and-forget, never blocks or breaks submission
+    // Send confirmation email — fire-and-forget, never blocks or breaks submission.
+    // A banned attempt gets the violation/ban email instead, never the "thanks for
+    // completing" confirmation — see the banReason branch below.
     const candidateEmail = attempt.candidate?.email;
     const candidateName  = attempt.candidate?.name ?? 'Candidate';
     if (!candidateEmail) {
       console.warn(`Confirmation email skipped: no email on candidate for attempt ${attemptId}`);
     }
-    if (candidateEmail) {
+    if (candidateEmail && !banReason) {
       void (async () => {
         try {
           // Fetch known fields via the generated Prisma client (always safe)
@@ -2159,8 +2162,77 @@ export async function performSubmission(attemptId: string, testId: string, autoS
       })();
     }
 
-    // Send result email — fire-and-forget, gated by the test's grading-mode/email settings
-    if (resultReleased && gradingPreferences.sendResultEmail && candidateEmail) {
+    // Send violation/ban email — fire-and-forget, only when this submission came from
+    // an admin force-submitting a candidate as a proctoring-violation ban.
+    if (candidateEmail && banReason) {
+      void (async () => {
+        try {
+          const testRow = await prisma.test.findUnique({
+            where: { id: testId },
+            select: { name: true, companyId: true },
+          });
+          if (!testRow) {
+            console.error(`Ban email: test ${testId} not found`);
+            return;
+          }
+
+          let companyName = 'Our Team';
+          if (testRow.companyId) {
+            try {
+              const company = await prisma.company.findUnique({
+                where: { id: testRow.companyId },
+                select: { name: true },
+              });
+              if (company?.name) companyName = company.name;
+            } catch { /* company name is optional */ }
+          }
+
+          let banEmailSubject: string | undefined;
+          let banEmailBody: string | undefined;
+          let banAssessmentMode: 'SEB' | 'NORMAL_BROWSER' = 'SEB';
+          try {
+            const rows = await prisma.$queryRaw<Array<{
+              assessmentMode: string;
+              banEmailSubject: string | null;
+              banEmailBody: string | null;
+              normalBrowserBanEmailSubject: string | null;
+              normalBrowserBanEmailBody: string | null;
+            }>>`SELECT "assessmentMode", "banEmailSubject", "banEmailBody",
+                       "normalBrowserBanEmailSubject", "normalBrowserBanEmailBody"
+                FROM "Test" WHERE id = ${testId}`;
+            if (rows.length > 0) {
+              banAssessmentMode = rows[0].assessmentMode === 'NORMAL_BROWSER' ? 'NORMAL_BROWSER' : 'SEB';
+              banEmailSubject = banAssessmentMode === 'NORMAL_BROWSER'
+                ? rows[0].normalBrowserBanEmailSubject ?? undefined
+                : rows[0].banEmailSubject ?? undefined;
+              banEmailBody = banAssessmentMode === 'NORMAL_BROWSER'
+                ? rows[0].normalBrowserBanEmailBody ?? undefined
+                : rows[0].banEmailBody ?? undefined;
+            }
+          } catch {
+            // columns not in DB yet — use default templates (safe to continue)
+          }
+
+          await sendBanEmail({
+            to: candidateEmail,
+            candidateName,
+            testName: testRow.name,
+            companyName,
+            violationReason: banReason,
+            banEmailSubject,
+            banEmailBody,
+            assessmentMode: banAssessmentMode,
+          });
+          console.log(`Violation/ban email sent to ${candidateEmail} for test "${testRow.name}"`);
+        } catch (err) {
+          console.error('Ban email error:', err);
+        }
+      })();
+    }
+
+    // Send result email — fire-and-forget, gated by the test's grading-mode/email settings.
+    // Skipped for a banned attempt — a candidate banned for cheating doesn't get a score email.
+    if (resultReleased && gradingPreferences.sendResultEmail && candidateEmail && !banReason) {
       void (async () => {
         try {
           const testRow = await prisma.test.findUnique({

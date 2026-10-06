@@ -257,6 +257,12 @@ model Test {
   normalBrowserConfirmEmailBody     String?
   normalBrowserReminderEmailSubject String?
   normalBrowserReminderEmailBody    String?
+  // Sent when an admin force-submits a candidate as a proctoring-violation ban (see
+  // TestAttempt.banned below). Supports {{violation_reason}} in addition to the usual vars.
+  banEmailSubject    String?
+  banEmailBody       String?
+  normalBrowserBanEmailSubject String?
+  normalBrowserBanEmailBody    String?
   // Hours before endTime the reminder sweep emails candidates who haven't started yet
   reminderHoursBeforeClose Int @default(24)
 
@@ -561,6 +567,13 @@ model TestAttempt {
   releasedAt        DateTime?
   releasedBy        String?
   resultEmailSentAt DateTime?
+
+  // Set when an admin force-submits this attempt specifically as a proctoring-violation
+  // ban (as opposed to an ordinary "candidate went quiet" force-submit) — triggers the
+  // ban/violation email instead of the normal completion email.
+  banned     Boolean   @default(false)
+  banReason  String?
+  bannedAt   DateTime?
 
   // Updated by a periodic client heartbeat while the exam tab is open; lets the expiry
   // sweep detect an abandoned attempt (tab closed, crash, network loss) and auto-submit

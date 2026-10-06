@@ -5,9 +5,48 @@ import { toast } from 'react-hot-toast';
 import { adminApi } from '../../services/api';
 import { TestAttempt } from '../../types';
 import { violationLabel } from '../../utils/violationLabels';
-import { FileDown, Mail, ChevronLeft, ChevronRight, XCircle, CheckCircle2, AlertTriangle, Trash2, Send, Clock, RotateCcw } from 'lucide-react';
+import { FileDown, Mail, ChevronLeft, ChevronRight, XCircle, CheckCircle2, AlertTriangle, Trash2, Send, Clock, RotateCcw, Ban } from 'lucide-react';
 import Icon from '../../components/Icon';
 import CustomSelect from '../../components/CustomSelect';
+
+/* -- Ban (violation) reason modal -- */
+function BanModal({ candidateName, onConfirm, onCancel }: { candidateName: string; onConfirm: (reason: string) => void; onCancel: () => void }) {
+  const [reason, setReason] = useState('');
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 50,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{ backgroundColor: 'white', borderRadius: '14px', padding: '28px', width: '420px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+        <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: '0 0 8px' }}>Ban {candidateName}</h3>
+        <p style={{ fontSize: '13px', color: '#6B7280', margin: '0 0 16px' }}>
+          This force-submits their attempt right now and emails them the violation/ban notice (see Settings → Email → Violation / Ban Email). Describe the violation you observed.
+        </p>
+        <textarea
+          value={reason}
+          onChange={e => setReason(e.target.value)}
+          placeholder="e.g. Multiple people visible on camera, reading answers from a second device..."
+          rows={3}
+          autoFocus
+          style={{
+            width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--admin-border)',
+            fontSize: '13px', color: '#374151', outline: 'none', boxSizing: 'border-box', backgroundColor: 'white',
+          }}
+        />
+        <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+          <button onClick={onCancel}
+            style={{ flex: 1, padding: '9px', borderRadius: '8px', border: '1.5px solid var(--admin-border)', backgroundColor: 'white', fontSize: '13px', fontWeight: 500, color: '#374151', cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button onClick={() => onConfirm(reason.trim())} disabled={!reason.trim()}
+            style={{ flex: 1, padding: '9px', borderRadius: '8px', border: 'none', backgroundColor: reason.trim() ? '#DC2626' : '#FCA5A5', fontSize: '13px', fontWeight: 600, color: 'white', cursor: reason.trim() ? 'pointer' : 'not-allowed' }}>
+            Submit & Ban
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 interface ActivityLogEntry {
   id: string;
   eventType: string;
@@ -101,6 +140,8 @@ export default function TestCandidatesPanel({ testId, onInvite, refreshKey = 0 }
   const [exporting, setExporting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [forceSubmittingId, setForceSubmittingId] = useState<string | null>(null);
+  const [banModalFor, setBanModalFor] = useState<{ attemptId: string; name: string } | null>(null);
+  const [banningId, setBanningId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -145,6 +186,20 @@ export default function TestCandidatesPanel({ testId, onInvite, refreshKey = 0 }
       await load();
     } catch { toast.error('Failed to force-submit attempt'); }
     finally { setForceSubmittingId(null); }
+  };
+
+  const handleBanCandidate = async (reason: string) => {
+    if (!banModalFor) return;
+    const { attemptId, name } = banModalFor;
+    setBanningId(attemptId);
+    try {
+      await adminApi.forceSubmitAttempt(attemptId, { banned: true, violationReason: reason });
+      toast.success(`${name} has been banned and notified by email`);
+      setBanModalFor(null);
+      setSelectedId(null);
+      await load();
+    } catch { toast.error('Failed to ban candidate'); }
+    finally { setBanningId(null); }
   };
 
   const handleResendInvitation = async (invitationId: string, name: string, hasAttempt: boolean) => {
@@ -225,9 +280,12 @@ export default function TestCandidatesPanel({ testId, onInvite, refreshKey = 0 }
   /* -- Integrity flags: real per-type counts from the backend, not guessed
      from the raw violation total (that used to always claim "Tab switch"
      happened regardless of what the actual violation type was). -- */
-  const integrityFlags: string[] = Object.entries(selAttempt?.violationCounts || {})
-    .filter(([, count]) => count > 0)
-    .map(([eventType, count]) => `${violationLabel(eventType)} ×${count}`);
+  const integrityFlags: string[] = [
+    ...(selAttempt?.banned ? [`Banned: ${selAttempt.banReason || 'Violation'}`] : []),
+    ...Object.entries(selAttempt?.violationCounts || {})
+      .filter(([, count]) => count > 0)
+      .map(([eventType, count]) => `${violationLabel(eventType)} ×${count}`),
+  ];
 
   useEffect(() => {
     if (!selAttempt?.id) { setActivityLogs([]); return; }
@@ -590,6 +648,16 @@ export default function TestCandidatesPanel({ testId, onInvite, refreshKey = 0 }
                     <Send width={16} height={16} style={{ color:'#EA580C' }} />
                   </button>
                 )}
+                {selAttempt?.status === 'in_progress' && (
+                  <button
+                    onClick={() => setBanModalFor({ attemptId: selAttempt.id, name: selInv.name })}
+                    disabled={banningId === selAttempt.id}
+                    className="p-3 rounded-xl border flex items-center justify-center hover:bg-red-50 transition-colors"
+                    style={{ borderColor:'#FCA5A5', backgroundColor:'white', cursor:'pointer' }}
+                    title="Ban for violation — force-submit and email them a ban notice">
+                    <Ban width={16} height={16} style={{ color:'#DC2626' }} />
+                  </button>
+                )}
                 <button
                   onClick={() => selAttempt?.id && (async () => {
                     try {
@@ -626,6 +694,14 @@ export default function TestCandidatesPanel({ testId, onInvite, refreshKey = 0 }
             </div>
           </div>
         </>
+      )}
+
+      {banModalFor && (
+        <BanModal
+          candidateName={banModalFor.name}
+          onConfirm={reason => void handleBanCandidate(reason)}
+          onCancel={() => setBanModalFor(null)}
+        />
       )}
     </div>
   );

@@ -9,7 +9,7 @@ import CustomSelect from '../../components/CustomSelect';
 
 type Panel = 'general' | 'access' |'assessmentmode'| 'behavior' | 'grading' | 'email' | 'danger';
 
-type EmailTab = 'invite' | 'confirm' | 'reminder';
+type EmailTab = 'invite' | 'confirm' | 'reminder' | 'ban';
 
 interface EmailTemplateSet {
   inviteEmailSubject: string;
@@ -18,6 +18,8 @@ interface EmailTemplateSet {
   confirmEmailBody: string;
   reminderEmailSubject: string;
   reminderEmailBody: string;
+  banEmailSubject: string;
+  banEmailBody: string;
 }
 
 interface EmailTemplates {
@@ -30,12 +32,14 @@ const EMAIL_TAB_LABELS: Record<EmailTab, string> = {
   invite: 'Invite Email',
   confirm: 'Confirmation Email',
   reminder: 'Reminder Email',
+  ban: 'Violation / Ban Email',
 };
 
 const EMAIL_TAB_DESCRIPTIONS: Record<EmailTab, string> = {
   invite: 'This email is sent to candidates when you invite them to take the test.',
   confirm: 'This email is sent to candidates when they complete the test.',
   reminder: "This email is sent to candidates who haven't started the test yet, as their access window is closing. It reuses the exact same invite link and access code originally sent to them — no new link is generated.",
+  ban: "This email is sent to a candidate when an invigilator force-submits their attempt as a proctoring-violation ban (e.g. caught cheating). It replaces the normal completion email and tells them they've been banned from the portal.",
 };
 
 
@@ -51,10 +55,12 @@ const AVAILABLE_VARS = [
   { key: '{{test_link}}',      desc: 'Invite URL — same link originally sent (invite & reminder emails)' },
   { key: '{{access_code}}',    desc: 'Access code (invite & reminder emails)' },
   { key: '{{closes_at}}',      desc: 'When the access window closes (reminder email only)' },
+  { key: '{{violation_reason}}', desc: 'Reason the invigilator gave for banning this candidate (ban email only)' },
 ];
 const INVITE_ONLY_VAR_KEYS = new Set(['{{exam_start}}', '{{exam_end}}']);
 const REMINDER_ONLY_VAR_KEYS = new Set(['{{closes_at}}']);
 const INVITE_AND_REMINDER_VAR_KEYS = new Set(['{{test_link}}', '{{access_code}}']);
+const BAN_ONLY_VAR_KEYS = new Set(['{{violation_reason}}']);
 const SEB_BUTTON_VAR_KEYS = new Set([
   '{{seb_install_button}}',
   '{{seb_continue_button}}',
@@ -356,7 +362,9 @@ const insertEmailToken = (token: string) => {
         ? { subject: activeTemplates.inviteEmailSubject, body: activeTemplates.inviteEmailBody }
         : tab === 'reminder'
           ? { subject: activeTemplates.reminderEmailSubject, body: activeTemplates.reminderEmailBody }
-          : { subject: activeTemplates.confirmEmailSubject, body: activeTemplates.confirmEmailBody }
+          : tab === 'ban'
+            ? { subject: activeTemplates.banEmailSubject, body: activeTemplates.banEmailBody }
+            : { subject: activeTemplates.confirmEmailSubject, body: activeTemplates.confirmEmailBody }
     );
     setEmailEditingMode(form.assessmentMode);
     setEmailEditing(tab);
@@ -370,7 +378,9 @@ const insertEmailToken = (token: string) => {
         ? { inviteEmailSubject: emailDraft.subject, inviteEmailBody: emailDraft.body }
         : emailEditing === 'reminder'
           ? { reminderEmailSubject: emailDraft.subject, reminderEmailBody: emailDraft.body }
-          : { confirmEmailSubject: emailDraft.subject, confirmEmailBody: emailDraft.body };
+          : emailEditing === 'ban'
+            ? { banEmailSubject: emailDraft.subject, banEmailBody: emailDraft.body }
+            : { confirmEmailSubject: emailDraft.subject, confirmEmailBody: emailDraft.body };
       await adminApi.updateEmailTemplates(testId, { ...patch, templateMode: emailEditingMode });
       setEmailTemplates(prev => prev ? {
         ...prev,
@@ -851,7 +861,7 @@ const insertEmailToken = (token: string) => {
 
                 {/* Tabs */}
                 <div style={{ display:'flex', borderBottom:'2px solid var(--admin-border)', marginBottom:'24px' }}>
-                  {(['invite','confirm','reminder'] as EmailTab[]).map(tab => (
+                  {(['invite','confirm','reminder','ban'] as EmailTab[]).map(tab => (
                     <button key={tab} type="button"
                       onClick={() => setEmailTab(tab)}
                       style={{
@@ -870,17 +880,21 @@ const insertEmailToken = (token: string) => {
                   const activeTemplates = emailTemplates.templates[form.assessmentMode];
                   const isInvite = emailTab === 'invite';
                   const isReminder = emailTab === 'reminder';
+                  const isBan = emailTab === 'ban';
                   const subject = isInvite ? activeTemplates.inviteEmailSubject
                     : isReminder ? activeTemplates.reminderEmailSubject
+                    : isBan ? activeTemplates.banEmailSubject
                     : activeTemplates.confirmEmailSubject;
                   const body = isInvite ? activeTemplates.inviteEmailBody
                     : isReminder ? activeTemplates.reminderEmailBody
+                    : isBan ? activeTemplates.banEmailBody
                     : activeTemplates.confirmEmailBody;
                   const editKey = emailTab;
                   const isVarApplicable = (key: string) => {
                     if (INVITE_ONLY_VAR_KEYS.has(key)) return isInvite;
                     if (REMINDER_ONLY_VAR_KEYS.has(key)) return isReminder;
                     if (INVITE_AND_REMINDER_VAR_KEYS.has(key)) return isInvite || isReminder;
+                    if (BAN_ONLY_VAR_KEYS.has(key)) return isBan;
                     if (SEB_BUTTON_VAR_KEYS.has(key)) return form.assessmentMode === 'SEB' && (isInvite || isReminder);
                     return true;
                   };

@@ -132,6 +132,9 @@ export interface TestAttempt {
   violationCounts?: Record<string, number>;
   isFlagged: boolean;
   flagReason?: string;
+  banned?: boolean;
+  banReason?: string;
+  bannedAt?: string;
   candidate?: Candidate;
   _count?: {
     mcqAnswers: number;

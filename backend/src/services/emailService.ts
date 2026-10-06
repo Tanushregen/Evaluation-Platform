@@ -95,6 +95,23 @@ Our team will review your results and get back to you soon.
 Best regards,
 {{company_name}} Team`;
 
+export const DEFAULT_BAN_SUBJECT = "Your TalentstaQ assessment access has been revoked";
+export const DEFAULT_BAN_BODY = `Hello {{candidate_name}},
+
+Your attempt on {{test_name}} has been terminated and submitted by the proctoring team due to a violation of our assessment integrity policy:
+
+{{violation_reason}}
+
+As a result, you have been banned from the TalentstaQ portal and will not be able to take further assessments through this platform. This decision has been shared with the hiring team.
+
+If you believe this is a mistake, please contact {{company_name}} directly.
+
+Best regards,
+{{company_name}} Team`;
+
+export const DEFAULT_NORMAL_BROWSER_BAN_SUBJECT = DEFAULT_BAN_SUBJECT;
+export const DEFAULT_NORMAL_BROWSER_BAN_BODY = DEFAULT_BAN_BODY;
+
 // ── Placeholder substitution ─────────────────────────────────────────────────
 interface TemplateVars {
   candidate_name: string;
@@ -106,19 +123,21 @@ interface TemplateVars {
   exam_start: string;
   exam_end: string;
   closes_at: string;
+  violation_reason?: string;
 }
 
 function applyTemplate(template: string, vars: TemplateVars): string {
   return template
-    .replace(/\{\{candidate_name\}\}/g, vars.candidate_name)
-    .replace(/\{\{test_name\}\}/g,      vars.test_name)
-    .replace(/\{\{company_name\}\}/g,   vars.company_name)
-    .replace(/\{\{estimated_time\}\}/g, vars.estimated_time)
-    .replace(/\{\{test_link\}\}/g,      vars.test_link)
-    .replace(/\{\{access_code\}\}/g,    vars.access_code)
-    .replace(/\{\{exam_start\}\}/g,     vars.exam_start)
-    .replace(/\{\{exam_end\}\}/g,       vars.exam_end)
-    .replace(/\{\{closes_at\}\}/g,      vars.closes_at);
+    .replace(/\{\{candidate_name\}\}/g,   vars.candidate_name)
+    .replace(/\{\{test_name\}\}/g,        vars.test_name)
+    .replace(/\{\{company_name\}\}/g,     vars.company_name)
+    .replace(/\{\{estimated_time\}\}/g,   vars.estimated_time)
+    .replace(/\{\{test_link\}\}/g,        vars.test_link)
+    .replace(/\{\{access_code\}\}/g,      vars.access_code)
+    .replace(/\{\{exam_start\}\}/g,       vars.exam_start)
+    .replace(/\{\{exam_end\}\}/g,         vars.exam_end)
+    .replace(/\{\{closes_at\}\}/g,        vars.closes_at)
+    .replace(/\{\{violation_reason\}\}/g, vars.violation_reason ?? '');
 }
 
 // Derives the sebs:// launch link for a candidate's test link. testLink is
@@ -302,6 +321,18 @@ interface ConfirmationEmailPayload {
   // custom templates (if set on the test)
   confirmEmailSubject?: string | null;
   confirmEmailBody?: string | null;
+  assessmentMode?: 'SEB' | 'NORMAL_BROWSER';
+}
+
+interface BanEmailPayload {
+  to: string;
+  candidateName: string;
+  testName: string;
+  companyName?: string;
+  violationReason: string;
+  // custom templates (if set on the test)
+  banEmailSubject?: string | null;
+  banEmailBody?: string | null;
   assessmentMode?: 'SEB' | 'NORMAL_BROWSER';
 }
 
@@ -700,6 +731,50 @@ ${textToHtml(text)}
 </div>`;
 }
 
+// ── Build violation/ban email from template ────────────────────────────────────
+function buildBanText(payload: BanEmailPayload): string {
+  const templateBody = payload.banEmailBody || (payload.assessmentMode === 'NORMAL_BROWSER'
+    ? DEFAULT_NORMAL_BROWSER_BAN_BODY
+    : DEFAULT_BAN_BODY);
+  return applyTemplate(templateBody, {
+    candidate_name: payload.candidateName,
+    test_name:      payload.testName,
+    company_name:   payload.companyName || 'Our Team',
+    estimated_time: '',
+    test_link:      '',
+    access_code:    '',
+    exam_start:     '',
+    exam_end:       '',
+    closes_at:      '',
+    violation_reason: payload.violationReason,
+  });
+}
+
+function buildBanSubject(payload: BanEmailPayload): string {
+  const templateSubject = payload.banEmailSubject || (payload.assessmentMode === 'NORMAL_BROWSER'
+    ? DEFAULT_NORMAL_BROWSER_BAN_SUBJECT
+    : DEFAULT_BAN_SUBJECT);
+  return applyTemplate(templateSubject, {
+    candidate_name: payload.candidateName,
+    test_name:      payload.testName,
+    company_name:   payload.companyName || 'Our Team',
+    estimated_time: '',
+    test_link:      '',
+    access_code:    '',
+    exam_start:     '',
+    exam_end:       '',
+    closes_at:      '',
+    violation_reason: payload.violationReason,
+  });
+}
+
+function buildBanHtml(payload: BanEmailPayload): string {
+  const text = buildBanText(payload);
+  return `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#374151;max-width:600px">
+${textToHtml(text)}
+</div>`;
+}
+
 // ── Build result email ────────────────────────────────────────────────────────
 function resultOutcomeLine(payload: ResultEmailPayload): string {
   if (payload.passed === null) return '';
@@ -1041,6 +1116,20 @@ export async function sendConfirmationEmail(payload: ConfirmationEmailPayload): 
     );
   } catch (error) {
     console.error('Failed to send confirmation email:', { error });
+    throw error;
+  }
+}
+
+export async function sendBanEmail(payload: BanEmailPayload): Promise<void> {
+  try {
+    await sendMail(
+      buildBanSubject(payload),
+      buildBanText(payload),
+      buildBanHtml(payload),
+      payload.to
+    );
+  } catch (error) {
+    console.error('Failed to send violation/ban email:', { error });
     throw error;
   }
 }
