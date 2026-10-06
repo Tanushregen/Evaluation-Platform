@@ -18,6 +18,10 @@ import {
   DEFAULT_NORMAL_BROWSER_CONFIRM_BODY,
   DEFAULT_NORMAL_BROWSER_REMINDER_SUBJECT,
   DEFAULT_NORMAL_BROWSER_REMINDER_BODY,
+  DEFAULT_BAN_SUBJECT,
+  DEFAULT_BAN_BODY,
+  DEFAULT_NORMAL_BROWSER_BAN_SUBJECT,
+  DEFAULT_NORMAL_BROWSER_BAN_BODY,
 } from '../services/emailService.js';
 import {
   DEFAULT_CUSTOM_AI_VIOLATION_EVENTS,
@@ -1699,6 +1703,10 @@ type EmailTemplateRow = {
   normalBrowserConfirmEmailBody: string | null;
   normalBrowserReminderEmailSubject: string | null;
   normalBrowserReminderEmailBody: string | null;
+  banEmailSubject: string | null;
+  banEmailBody: string | null;
+  normalBrowserBanEmailSubject: string | null;
+  normalBrowserBanEmailBody: string | null;
   reminderHoursBeforeClose: number;
 };
 
@@ -1722,6 +1730,10 @@ export async function getEmailTemplates(req: AuthenticatedRequest, res: Response
         normalBrowserConfirmEmailBody: true,
         normalBrowserReminderEmailSubject: true,
         normalBrowserReminderEmailBody: true,
+        banEmailSubject: true,
+        banEmailBody: true,
+        normalBrowserBanEmailSubject: true,
+        normalBrowserBanEmailBody: true,
         reminderHoursBeforeClose: true,
       }
     }) as EmailTemplateRow | null;
@@ -1738,6 +1750,8 @@ export async function getEmailTemplates(req: AuthenticatedRequest, res: Response
       confirmEmailBody: test.confirmEmailBody ?? DEFAULT_CONFIRM_BODY,
       reminderEmailSubject: test.reminderEmailSubject ?? DEFAULT_REMINDER_SUBJECT,
       reminderEmailBody: test.reminderEmailBody ?? DEFAULT_REMINDER_BODY,
+      banEmailSubject: test.banEmailSubject ?? DEFAULT_BAN_SUBJECT,
+      banEmailBody: test.banEmailBody ?? DEFAULT_BAN_BODY,
     };
     const normalBrowserTemplates = {
       inviteEmailSubject: test.normalBrowserInviteEmailSubject ?? DEFAULT_NORMAL_BROWSER_INVITE_SUBJECT,
@@ -1746,6 +1760,8 @@ export async function getEmailTemplates(req: AuthenticatedRequest, res: Response
       confirmEmailBody: test.normalBrowserConfirmEmailBody ?? DEFAULT_NORMAL_BROWSER_CONFIRM_BODY,
       reminderEmailSubject: test.normalBrowserReminderEmailSubject ?? DEFAULT_NORMAL_BROWSER_REMINDER_SUBJECT,
       reminderEmailBody: test.normalBrowserReminderEmailBody ?? DEFAULT_NORMAL_BROWSER_REMINDER_BODY,
+      banEmailSubject: test.normalBrowserBanEmailSubject ?? DEFAULT_NORMAL_BROWSER_BAN_SUBJECT,
+      banEmailBody: test.normalBrowserBanEmailBody ?? DEFAULT_NORMAL_BROWSER_BAN_BODY,
     };
     const activeTemplates = test.assessmentMode === 'NORMAL_BROWSER' ? normalBrowserTemplates : sebTemplates;
 
@@ -1771,6 +1787,7 @@ export async function updateEmailTemplates(req: AuthenticatedRequest, res: Respo
       inviteEmailSubject, inviteEmailBody,
       confirmEmailSubject, confirmEmailBody,
       reminderEmailSubject, reminderEmailBody,
+      banEmailSubject, banEmailBody,
       reminderHoursBeforeClose,
       templateMode,
     } = req.body as {
@@ -1780,6 +1797,8 @@ export async function updateEmailTemplates(req: AuthenticatedRequest, res: Respo
       confirmEmailBody?: string;
       reminderEmailSubject?: string;
       reminderEmailBody?: string;
+      banEmailSubject?: string;
+      banEmailBody?: string;
       reminderHoursBeforeClose?: number;
       templateMode?: 'SEB' | 'NORMAL_BROWSER';
     };
@@ -1824,6 +1843,12 @@ export async function updateEmailTemplates(req: AuthenticatedRequest, res: Respo
     }
     if (reminderEmailBody !== undefined) {
       data[normalBrowser ? 'normalBrowserReminderEmailBody' : 'reminderEmailBody'] = sanitizeInput(reminderEmailBody);
+    }
+    if (banEmailSubject !== undefined) {
+      data[normalBrowser ? 'normalBrowserBanEmailSubject' : 'banEmailSubject'] = sanitizeInput(banEmailSubject);
+    }
+    if (banEmailBody !== undefined) {
+      data[normalBrowser ? 'normalBrowserBanEmailBody' : 'banEmailBody'] = sanitizeInput(banEmailBody);
     }
     if (reminderHoursBeforeClose !== undefined) data.reminderHoursBeforeClose = Math.round(reminderHoursBeforeClose);
 

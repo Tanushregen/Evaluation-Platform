@@ -1001,9 +1001,19 @@ export async function deleteAttempt(req: AuthenticatedRequest, res: Response): P
 // were saved so far instead of waiting for the full test duration to elapse (the only other path
 // to finalization; see testExpiryService.ts's sweep). Reuses performSubmission so grading is
 // identical to a normal or auto-submit.
+//
+// An invigilator who catches a candidate cheating uses the same action but passes
+// `banned: true` + `violationReason`: this additionally marks the attempt as banned and
+// sends the violation/ban email instead of the usual completion email.
 export async function forceSubmitAttempt(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { attemptId } = req.params;
+    const { banned, violationReason } = req.body as { banned?: boolean; violationReason?: string };
+
+    if (banned && (typeof violationReason !== 'string' || !violationReason.trim())) {
+      res.status(400).json({ error: 'violationReason is required to ban a candidate' });
+      return;
+    }
 
     const attempt = await prisma.testAttempt.findUnique({
       where: { id: attemptId },
@@ -1025,13 +1035,26 @@ export async function forceSubmitAttempt(req: AuthenticatedRequest, res: Respons
       return;
     }
 
-    const outcome = await performSubmission(attemptId, attempt.testId, true, 'Force-submitted by admin');
+    const reason = banned
+      ? `Force-submitted by admin — candidate banned: ${violationReason!.trim()}`
+      : 'Force-submitted by admin';
+
+    const outcome = await performSubmission(
+      attemptId,
+      attempt.testId,
+      true,
+      reason,
+      banned ? violationReason!.trim() : undefined
+    );
     if (!outcome.ok) {
       res.status(outcome.statusCode).json({ error: outcome.error });
       return;
     }
 
-    res.json({ message: 'Attempt force-submitted successfully', ...outcome.payload });
+    res.json({
+      message: banned ? 'Attempt force-submitted and candidate banned' : 'Attempt force-submitted successfully',
+      ...outcome.payload
+    });
   } catch (error) {
     console.error('Force submit attempt error:', error);
     res.status(500).json({ error: 'Internal server error' });
