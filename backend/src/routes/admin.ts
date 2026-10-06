@@ -81,6 +81,7 @@ import {
   autoGradeCommunicationAnswer,
   deleteAttempt,
   forceSubmitAttempt,
+  rephraseViolationReason,
   reEvaluateAttempt,
   exportResults,
   getDashboardStats,
@@ -305,6 +306,7 @@ router.post('/attempts/:attemptId/communication/:questionId/grade', adminAuth, g
 router.post('/attempts/:attemptId/communication/:questionId/auto-grade', adminAuth, autoGradeCommunicationAnswer);
 router.delete('/attempts/:attemptId', adminAuth, deleteAttempt);
 router.post('/attempts/:attemptId/force-submit', adminAuth, forceSubmitAttempt);
+router.post('/violation-reason/rephrase', adminAuth, rephraseViolationReason);
 router.post('/attempts/:attemptId/reevaluate', adminAuth, reEvaluateAttempt);
 router.get('/tests/:testId/export', adminAuth, requireFeatureEnabled('results_export'), exportResults);
 router.get('/trust-reports', adminAuth, getTrustReports);
