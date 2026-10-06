@@ -83,7 +83,7 @@ function BanModal({ candidateName, submitting, onConfirm, onCancel }: {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 200,
+      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1100,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{ backgroundColor: 'white', borderRadius: '14px', padding: '28px', width: '420px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
@@ -482,15 +482,11 @@ function GridTile({
   isSelected,
   onRoom,
   onSelectChat,
-  onBan,
-  banning,
 }: {
   candidate: LiveCandidate;
   isSelected: boolean;
   onRoom: (room: Room | null) => void;
   onSelectChat: () => void;
-  onBan?: () => void;
-  banning?: boolean;
 }) {
   return (
     <button
@@ -542,7 +538,7 @@ function GridTile({
           style={{
             position: 'absolute',
             top: '8px',
-            right: onBan ? '38px' : '8px',
+            right: '8px',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -555,33 +551,6 @@ function GridTile({
         >
           <AlertTriangle size={12} />
         </span>
-      )}
-
-      {onBan && (
-        <button
-          type="button"
-          title="Ban for violation — force-submit and email them a ban notice"
-          aria-label="Ban candidate"
-          onClick={(e) => { e.stopPropagation(); onBan(); }}
-          disabled={banning}
-          style={{
-            position: 'absolute',
-            top: '8px',
-            right: '8px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '22px',
-            height: '22px',
-            borderRadius: '50%',
-            border: 'none',
-            backgroundColor: 'rgba(0,0,0,0.55)',
-            color: banning ? '#6B7280' : '#F87171',
-            cursor: banning ? 'default' : 'pointer',
-          }}
-        >
-          <Ban size={12} />
-        </button>
       )}
 
       <div
@@ -1812,8 +1781,6 @@ export default function LiveProctoring() {
                       isSelected={gridChatAttemptId === candidate.attemptId}
                       onRoom={(room) => handleGridTileRoom(candidate.attemptId, room)}
                       onSelectChat={() => setGridChatAttemptId(candidate.attemptId)}
-                      onBan={() => setBanModalFor({ attemptId: candidate.attemptId, name: candidate.name })}
-                      banning={banningId === candidate.attemptId}
                     />
                   ))
               ) : (
@@ -1831,11 +1798,38 @@ export default function LiveProctoring() {
             </div>
 
             {/* Main stage — big picture of the pinned/selected candidate */}
-            <div style={{ flex: 1, minWidth: 0, padding: '16px', display: 'flex' }}>
-              <MainStage
-                candidate={gridChatCandidate}
-                room={(gridChatAttemptId && gridRoomsRef.current[gridChatAttemptId]) || null}
-              />
+            <div style={{ flex: 1, minWidth: 0, padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+                <MainStage
+                  candidate={gridChatCandidate}
+                  room={(gridChatAttemptId && gridRoomsRef.current[gridChatAttemptId]) || null}
+                />
+              </div>
+              {gridChatCandidate?.attemptId && (
+                <button
+                  type="button"
+                  onClick={() => setBanModalFor({ attemptId: gridChatCandidate.attemptId!, name: gridChatCandidate.name })}
+                  disabled={banningId === gridChatCandidate.attemptId}
+                  style={{
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '7px',
+                    padding: '10px 14px',
+                    borderRadius: '10px',
+                    border: '1px solid #7F1D1D',
+                    backgroundColor: banningId === gridChatCandidate.attemptId ? '#450A0A' : 'rgba(225,29,72,0.12)',
+                    color: '#FCA5A5',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: banningId === gridChatCandidate.attemptId ? 'default' : 'pointer',
+                  }}
+                >
+                  <Ban size={15} />
+                  {banningId === gridChatCandidate.attemptId ? 'Banning…' : `Ban ${gridChatCandidate.name}`}
+                </button>
+              )}
             </div>
 
             <div
