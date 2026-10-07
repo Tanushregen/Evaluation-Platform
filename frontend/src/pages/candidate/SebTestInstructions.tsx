@@ -8,6 +8,7 @@ import { getCachedStreams } from '../../services/devicePermissionService';
 import { DEFAULT_CUSTOM_AI_VIOLATIONS, normalizeCustomAIViolationSelection, filterViolationsForAssessmentMode } from '../../constants/customAIViolations';
 import TestInstructionsCard, { type InstructionItem, type QuestionMixEntry } from './TestInstructionsCard';
 import talentstaQLogo from '../../assets/assessment-icons/icons/Talentstaq logo dark.svg';
+import OnboardingSteps from '../../components/OnboardingSteps';
 
 interface TestDetails {
   test: {
@@ -320,6 +321,10 @@ export default function TestInstructions() {
           )}
         </div>
       </header>
+
+      <div className="bg-white border-b" style={{ borderColor: 'var(--admin-border-soft)' }}>
+        <OnboardingSteps current="instructions" />
+      </div>
 
       {/* -- Body -- */}
       <main className="px-4 sm:px-6 py-6 sm:py-8">

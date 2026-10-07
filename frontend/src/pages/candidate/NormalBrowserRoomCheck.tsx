@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { Sun, RotateCcw } from 'lucide-react';
+import { Sun, RotateCcw, AlertCircle } from 'lucide-react';
 import { candidateApi } from '../../services/api';
 import { getCachedStreams } from '../../services/devicePermissionService';
 import { acquireVerifiedCameraStream } from '../../services/cameraDeviceService';
 import { sampleBrightness, isRoomBrightEnough } from '../../services/clientRoomCheckService';
 import talentstaQLogo from '../../assets/assessment-icons/icons/Talentstaq logo dark.svg';
+import OnboardingSteps from '../../components/OnboardingSteps';
+import RoomCheckGuidelines from '../../components/RoomCheckGuidelines';
 
 interface TestDetails {
   test: {
@@ -55,7 +57,7 @@ export default function NormalBrowserRoomCheck() {
         .catch(() => {});
 
       if (ok) {
-        window.setTimeout(() => navigate('/test/id-verification', { replace: true }), 900);
+        window.setTimeout(() => navigate('/test/id-verification', { replace: true }), 2000);
       }
     } finally {
       setChecking(false);
@@ -114,6 +116,8 @@ export default function NormalBrowserRoomCheck() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
 
+  const wellLit = isRoomBrightEnough(brightness);
+
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--admin-bg)' }}>
       <header className="bg-white border-b" style={{ borderColor: 'var(--admin-border)' }}>
@@ -122,59 +126,81 @@ export default function NormalBrowserRoomCheck() {
         </div>
       </header>
 
-      <main className="flex-1 flex items-center justify-center px-4">
-        <div
-          className="w-full max-w-md bg-white rounded-2xl p-8 text-center"
-          style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06)' }}
-        >
-          <h1 className="text-lg font-semibold" style={{ color: 'var(--admin-text)' }}>
-            Check-in: Room check
-          </h1>
-          <p className="text-sm mt-1 mb-5" style={{ color: 'var(--admin-text-muted)' }}>
-            Make sure your room is well lit before you continue.
-          </p>
+      <OnboardingSteps current="room-check" />
 
+      <main className="flex-1 px-4 pb-10 pt-2">
+        <div className="max-w-4xl mx-auto grid gap-5" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,300px)' }}>
           <div
-            className="relative rounded-xl overflow-hidden mb-5"
-            style={{ aspectRatio: '4 / 3', background: '#111827' }}
+            className="bg-white rounded-2xl p-6"
+            style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06)' }}
           >
-            <video ref={videoRef} muted playsInline className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
-          </div>
-
-          {phase !== 'result' && (
-            <p className="text-sm" style={{ color: 'var(--admin-text-muted)' }}>
-              {checking ? 'Checking your room…' : 'Getting your camera ready…'}
+            <h1 className="text-base font-semibold" style={{ color: 'var(--admin-text)' }}>
+              Check Your Room Lighting
+            </h1>
+            <p className="text-sm mt-1 mb-4" style={{ color: 'var(--admin-text-muted)' }}>
+              Make sure your room is well lit and your face is clearly visible before you continue.
             </p>
-          )}
 
-          {phase === 'result' && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-center gap-4 text-sm">
-                <span className="flex items-center gap-1.5" style={{ color: isRoomBrightEnough(brightness) ? '#16A34A' : '#DC2626' }}>
-                  <Sun width={15} height={15} /> {isRoomBrightEnough(brightness) ? 'Well lit' : 'Too dark'}
+            <div
+              className="relative rounded-xl overflow-hidden mb-4"
+              style={{ aspectRatio: '16 / 9', background: '#111827' }}
+            >
+              <video ref={videoRef} muted playsInline className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
+              {phase === 'result' && (
+                <span
+                  className="absolute top-3 right-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+                  style={{ backgroundColor: wellLit ? 'rgba(22,163,74,0.9)' : 'rgba(220,38,38,0.9)', color: 'white' }}
+                >
+                  <Sun width={12} height={12} /> {wellLit ? 'Well lit' : 'Low light'}
                 </span>
-              </div>
-
-              {passed ? (
-                <p className="text-sm font-medium" style={{ color: '#16A34A' }}>Looks good — continuing…</p>
-              ) : (
-                <>
-                  <p className="text-sm font-medium" style={{ color: '#DC2626' }}>
-                    Your room looks too dark — try turning on a light or facing a window.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => { setPhase('checking'); void runCheck(); }}
-                    disabled={checking}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-                    style={{ backgroundColor: 'var(--admin-accent)', opacity: checking ? 0.6 : 1 }}
-                  >
-                    <RotateCcw width={14} height={14} /> Check again
-                  </button>
-                </>
               )}
             </div>
-          )}
+
+            {phase !== 'result' && (
+              <p className="text-sm text-center" style={{ color: 'var(--admin-text-muted)' }}>
+                {checking ? 'Checking your room…' : 'Getting your camera ready…'}
+              </p>
+            )}
+
+            {phase === 'result' && (
+              <div>
+                {passed ? (
+                  <p className="text-sm font-medium text-center" style={{ color: '#16A34A' }}>Looks good — continuing…</p>
+                ) : (
+                  <>
+                    <div
+                      className="flex items-start gap-3 rounded-xl p-4 mb-4"
+                      style={{ backgroundColor: '#FEF2F2', border: '1px solid #FEE2E2' }}
+                    >
+                      <AlertCircle width={18} height={18} color="#DC2626" style={{ flexShrink: 0, marginTop: '1px' }} />
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: '#991B1B' }}>Your room looks too dark</p>
+                        <p className="text-sm" style={{ color: '#B91C1C' }}>
+                          Try turning on a light or face a window so that your face is clearly visible.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() => { setPhase('checking'); void runCheck(); }}
+                        disabled={checking}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                        style={{ backgroundColor: 'var(--admin-accent)', opacity: checking ? 0.6 : 1 }}
+                      >
+                        <RotateCcw width={14} height={14} /> Check again
+                      </button>
+                    </div>
+                  </>
+                )}
+                <p className="text-xs text-center mt-4" style={{ color: 'var(--admin-text-subtle)' }}>
+                  Once the lighting is good, you can continue to the next step.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <RoomCheckGuidelines />
         </div>
       </main>
     </div>

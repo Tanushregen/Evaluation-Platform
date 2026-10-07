@@ -10,6 +10,7 @@ import SystemCheckCard, { type SystemCheckTile } from './SystemCheckCard';
 import MicCheckWaveform from '../../components/MicCheckWaveform';
 import SystemCheckCameraPanel from '../../components/SystemCheckCameraPanel';
 import talentstaQLogo from '../../assets/assessment-icons/icons/Talentstaq logo dark.svg';
+import OnboardingSteps from '../../components/OnboardingSteps';
 
 interface TestDetails {
   test: {
@@ -293,6 +294,10 @@ export default function NormalBrowserSystemCheck() {
           <img src={talentstaQLogo} alt="TalentstaQ" style={{ height: '26px', width: 'auto' }} />
         </div>
       </header>
+
+      <div className="relative bg-white border-b" style={{ borderColor: 'var(--admin-border-soft)' }}>
+        <OnboardingSteps current="system-check" />
+      </div>
 
       <main className="relative flex-1 min-h-0 overflow-y-auto flex items-start justify-center px-4 sm:px-6 py-4 sm:py-6">
         <SystemCheckCard
