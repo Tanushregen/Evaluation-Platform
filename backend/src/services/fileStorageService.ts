@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs/promises';
 import fsSync from 'fs';
+import sharp from 'sharp';
 import {
   b2Configured,
   deleteB2Object,
@@ -13,6 +14,40 @@ import {
 } from '../utils/b2Storage.js';
 
 const prisma = new PrismaClient();
+
+// Long edge cap and quality for re-encoded images — these are evidence to review
+// (violation snapshots, face/ID photos), not source assets to re-edit, so this
+// costs nothing in usefulness while meaningfully shrinking what we store/transfer.
+// A phone-camera ID photo can arrive at 3000px+; a webcam snapshot rarely exceeds
+// 1280px to begin with, so this mostly only bites on the oversized uploads.
+const MAX_IMAGE_DIMENSION = 1600;
+const JPEG_QUALITY = 78;
+const WEBP_QUALITY = 78;
+
+// Recompresses an image buffer before it's written to storage (B2 or otherwise).
+// Keeps the original format/mimeType — only the bytes get smaller — so nothing
+// downstream that checks file extension/content-type is affected. Animated GIFs
+// are passed through untouched (re-encoding risks dropping frames for little gain
+// — these are rare for snapshots/ID photos in practice). Falls back to the
+// original buffer on any encoder error rather than failing the upload.
+async function optimizeImageBuffer(buffer: Buffer, mimeType: string): Promise<Buffer> {
+  try {
+    const resize = { width: MAX_IMAGE_DIMENSION, height: MAX_IMAGE_DIMENSION, fit: 'inside' as const, withoutEnlargement: true };
+    if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
+      return await sharp(buffer).rotate().resize(resize).jpeg({ quality: JPEG_QUALITY, mozjpeg: true }).toBuffer();
+    }
+    if (mimeType === 'image/png') {
+      return await sharp(buffer).rotate().resize(resize).png({ compressionLevel: 9, effort: 10 }).toBuffer();
+    }
+    if (mimeType === 'image/webp') {
+      return await sharp(buffer).rotate().resize(resize).webp({ quality: WEBP_QUALITY }).toBuffer();
+    }
+    return buffer;
+  } catch (error) {
+    console.error('Image optimization failed, storing original bytes:', error);
+    return buffer;
+  }
+}
 
 // Allowed MIME types
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
@@ -357,7 +392,7 @@ export function generateUniqueFilename(originalName: string): string {
  * Store file in configured storage backend
  */
 export async function storeFile(
-  buffer: Buffer,
+  rawBuffer: Buffer,
   filename: string,
   originalName: string,
   mimeType: string,
@@ -366,6 +401,10 @@ export async function storeFile(
   metadata?: Record<string, unknown>
 ): Promise<UploadResult> {
   try {
+    const buffer = ALLOWED_IMAGE_TYPES.includes(mimeType)
+      ? await optimizeImageBuffer(rawBuffer, mimeType)
+      : rawBuffer;
+
     // Proctoring recordings/snapshots go to the same B2 bucket + <test>/<candidate>
     // folder layout as LiveKit egress video (see b2Storage.ts), so admins can browse
     // one assessment's candidate folder and find the webcam recording, violation
