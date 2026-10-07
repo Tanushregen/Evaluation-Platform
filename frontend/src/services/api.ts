@@ -739,7 +739,7 @@ export const candidateApi = {
     api.post('/candidate/activity', data),
 
   heartbeat: () =>
-    api.post('/candidate/heartbeat'),
+    api.post<{ ok: boolean; status: string; banned: boolean }>('/candidate/heartbeat'),
 
   submitTest: (data: { autoSubmit?: boolean; reason?: string }) =>
     api.post<SubmissionResult>('/candidate/test/submit', data),
