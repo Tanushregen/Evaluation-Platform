@@ -5,6 +5,7 @@ import { ChevronLeft, ShieldCheck } from 'lucide-react';
 import { candidateApi } from '../../services/api';
 import IDVerification from '../../components/IDVerification';
 import talentstaQLogo from '../../assets/assessment-icons/icons/Talentstaq logo dark.svg';
+import OnboardingSteps from '../../components/OnboardingSteps';
 
 function handleSebExit() {
   const sebQuitUrl = localStorage.getItem('sebQuitUrl');
@@ -99,6 +100,10 @@ export default function SebIdVerification() {
           </div>
         </div>
       </header>
+
+      <div className="relative bg-white border-b" style={{ borderColor: 'var(--admin-border-soft)' }}>
+        <OnboardingSteps current="id-verification" />
+      </div>
 
       <main className="relative flex-1 min-h-0 overflow-y-auto flex items-start justify-center px-4 sm:px-6 py-4 sm:py-6">
         <div className="w-full max-w-5xl">
