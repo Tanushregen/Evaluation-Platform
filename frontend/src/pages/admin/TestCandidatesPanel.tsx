@@ -228,7 +228,23 @@ export default function TestCandidatesPanel({ testId, onInvite, refreshKey = 0 }
     finally { setBanningId(null); }
   };
 
-  const handleResendInvitation = async (invitationId: string, name: string, hasAttempt: boolean) => {
+  const handleResendInvitation = async (
+    invitationId: string,
+    name: string,
+    hasAttempt: boolean,
+    banned?: boolean,
+    banReason?: string | null,
+  ) => {
+    // Banned candidates don't get a confirm dialog or an email — just the
+    // block message. No request even leaves the browser; the backend also
+    // enforces this (resendInvitationForCandidate) in case this check is
+    // ever bypassed. Does not apply to any other candidate status.
+    if (banned) {
+      toast.error(
+        `${name} has been banned for violating examination protocol${banReason ? `: ${banReason}` : ''}. The invitation cannot be resent for this test.`,
+      );
+      return;
+    }
     const confirmMsg = hasAttempt
       ? `Resend the invitation to ${name}? Their current attempt (answers, score) will be reset so the new link starts a clean retake.`
       : `Resend the invitation to ${name}? A new link and access code will be emailed to them.`;
@@ -701,12 +717,12 @@ export default function TestCandidatesPanel({ testId, onInvite, refreshKey = 0 }
                   <FileDown width={16} height={16} style={{ color:'var(--admin-text-muted)' }} />
                 </button>
                 <button
-                  onClick={() => handleResendInvitation(selInv.id, selInv.name, !!selAttempt)}
+                  onClick={() => handleResendInvitation(selInv.id, selInv.name, !!selAttempt, selAttempt?.banned, selAttempt?.banReason)}
                   disabled={resendingId === selInv.id}
                   className="p-3 rounded-xl border flex items-center justify-center hover:bg-blue-50 transition-colors"
                   style={{ borderColor:'var(--admin-border)', backgroundColor:'white', cursor:'pointer', opacity: resendingId === selInv.id ? 0.5 : 1 }}
-                  title="Resend invitation — new link, resets their attempt for a clean retake">
-                  <RotateCcw width={16} height={16} style={{ color:'var(--admin-accent-link)' }} />
+                  title={selAttempt?.banned ? 'This candidate has been banned and cannot be resent an invitation' : 'Resend invitation — new link, resets their attempt for a clean retake'}>
+                  <RotateCcw width={16} height={16} style={{ color: selAttempt?.banned ? '#9CA3AF' : 'var(--admin-accent-link)' }} />
                 </button>
                 <button
                   onClick={() => handleDeleteCandidate(selInv.id, selInv.name)}

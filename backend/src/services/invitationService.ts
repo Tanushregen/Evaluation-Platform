@@ -953,6 +953,24 @@ export async function resendInvitationForCandidate(input: {
   const candidate = await prisma.candidate.findUnique({ where: { email: invitation.email } });
   let attemptReset = false;
   if (candidate) {
+    // A candidate banned for a violation on this test stays blocked from a
+    // resend permanently — not just on their latest attempt — so check the
+    // whole history, not only the most recent row. Mirrors the frontend's
+    // own check (TestCandidatesPanel.tsx's handleResendInvitation), which
+    // normally keeps this request from ever being sent; this is the
+    // server-side backstop in case that check is bypassed.
+    const bannedAttempt = await prisma.testAttempt.findFirst({
+      where: { testId: test.id, candidateId: candidate.id, banned: true },
+      select: { banReason: true },
+      orderBy: { bannedAt: 'desc' },
+    });
+    if (bannedAttempt) {
+      throw new InvitationServiceError(
+        `This candidate has been banned for violating examination protocol${bannedAttempt.banReason ? `: ${bannedAttempt.banReason}` : ''}. The invitation cannot be resent for this test.`,
+        403,
+      );
+    }
+
     const existingAttempt = await prisma.testAttempt.findFirst({
       where: { testId: test.id, candidateId: candidate.id },
       orderBy: { attemptNumber: 'desc' }
