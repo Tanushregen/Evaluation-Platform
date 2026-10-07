@@ -5,7 +5,7 @@ import { AuthenticatedRequest } from '../types/index.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 import { executeCode, compareOutput } from '../utils/codeExecutor.js';
 import prisma from '../utils/db.js';
-import { emitToAdminRoom, emitToTestProctorRoom, emitToProctorTargets } from '../services/socketService.js';
+import { emitToAdminRoom, emitToTestProctorRoom, emitToProctorTargets, emitToAttemptProctorRoom } from '../services/socketService.js';
 import { Prisma } from '@prisma/client';
 import {
   InvitationServiceError,
@@ -1762,11 +1762,29 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
 export async function heartbeat(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { attemptId } = req.candidate!;
-    await prisma.testAttempt.updateMany({
-      where: { id: attemptId, status: 'in_progress' },
-      data: { lastSeenAt: new Date() }
+    const attempt = await prisma.testAttempt.findUnique({
+      where: { id: attemptId },
+      select: { status: true, banned: true },
     });
-    res.json({ ok: true });
+
+    if (!attempt) {
+      res.status(404).json({ error: 'Attempt not found' });
+      return;
+    }
+
+    // Only bump lastSeenAt while still in progress — once finalized, the expiry
+    // sweep no longer cares, and a stale heartbeat after the fact shouldn't matter.
+    if (attempt.status === 'in_progress') {
+      await prisma.testAttempt.update({
+        where: { id: attemptId },
+        data: { lastSeenAt: new Date() }
+      });
+    }
+
+    // status/banned let the candidate UI notice it was force-submitted/banned even when
+    // the real-time socket event (see performSubmission's attempt-terminated emit) was
+    // missed — e.g. proctoring is off for this test, or the socket briefly dropped.
+    res.json({ ok: true, status: attempt.status, banned: attempt.banned });
   } catch (error) {
     console.error('Heartbeat error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -2043,6 +2061,18 @@ export async function performSubmission(attemptId: string, testId: string, autoS
 
     emitToTestProctorRoom(testId, 'test-submitted', submissionPayload);
     emitToAdminRoom(test.adminId, 'test-submitted', submissionPayload);
+
+    // Tell the candidate's own browser immediately when THEY didn't initiate this submit
+    // (admin force-submit/ban, or the server-side expiry sweep) — otherwise their exam UI
+    // has no idea the attempt was already finalized and they can keep answering questions
+    // until they happen to hit Submit themselves and get a late "already submitted" error.
+    emitToAttemptProctorRoom(attemptId, 'attempt-terminated', {
+      attemptId,
+      banned: !!banReason,
+      message: banReason
+        ? 'Your test has been ended by the proctor due to a policy violation.'
+        : (autoSubmit ? 'Your test has been automatically submitted.' : 'Your test has been submitted.'),
+    });
 
     // Persist notification to DB
     void ensureNotificationTable().then(() =>

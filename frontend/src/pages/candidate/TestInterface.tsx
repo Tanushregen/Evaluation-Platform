@@ -428,12 +428,30 @@ export default function TestInterface() {
   }, [attemptId, proctorMessages]);
 
   const proctorStatusRef = useRef(proctorStatus);
+  const isSubmittedRef = useRef(isSubmitted);
   const hiddenAtRef = useRef<number | null>(null);
   const blurAtRef = useRef<number | null>(null);
   const isTestFrozen = proctorStatus.testFrozen || faceFrozen || policyPaused;
   const answeringLocked = isTestFrozen || timeUp;
 
   useEffect(() => { proctorStatusRef.current = proctorStatus; }, [proctorStatus]);
+  useEffect(() => { isSubmittedRef.current = isSubmitted; }, [isSubmitted]);
+
+  // Fires when the server tells us this attempt was finalized by something other than
+  // this browser — an admin force-submit/ban, or the server-side expiry sweep — so a
+  // candidate can't keep answering an exam that's already been graded. Reached via the
+  // real-time 'attempt-terminated' socket event (instant, proctored tests only) and the
+  // heartbeat poll fallback (~15s worst case, works even without proctoring).
+  const handleRemoteTermination = useCallback((message: string) => {
+    if (isSubmittedRef.current) return;
+    disconnectLiveProctoring();
+    void endProctoringSession().catch(() => {});
+    setSubmitted();
+    toast.error(message, { duration: 6000 });
+    const previewId = localStorage.getItem('previewMode');
+    if (previewId) { localStorage.removeItem('previewMode'); navigate(`/admin/tests/${previewId}`); }
+    else navigate('/test/complete');
+  }, [disconnectLiveProctoring, endProctoringSession, setSubmitted, navigate]);
 
   useEffect(() => {
     if (timeUp && !isSubmitted) setShowConfirmSubmit(true);
@@ -486,6 +504,11 @@ export default function TestInterface() {
       handleProctorViolationUI(payload.violation.type, payload.violation.description);
     };
     socket.on('violation-detected', handleRealtimeViolation);
+    const handleAttemptTerminated = (payload: { attemptId: string; banned?: boolean; message?: string }) => {
+      if (!payload || payload.attemptId !== attemptId) return;
+      handleRemoteTermination(payload.message || 'Your test has ended.');
+    };
+    socket.on('attempt-terminated', handleAttemptTerminated);
     const statusInterval = setInterval(() => {
       const s = proctorStatusRef.current;
       socket.emit('proctor-status', { testId, attemptId, status: { cameraOn: s.cameraEnabled, micOn: s.microphoneEnabled, screenSharing: s.screenShareEnabled, faceDetected: s.faceDetected, lookingAtScreen: s.lookingAtScreen, cameraBlocked: s.cameraBlocked, testFrozen: s.testFrozen, monitorCount: s.monitorCount } });
@@ -497,11 +520,12 @@ export default function TestInterface() {
     }, 6000);
     return () => {
       socket.off('violation-detected', handleRealtimeViolation);
+      socket.off('attempt-terminated', handleAttemptTerminated);
       clearInterval(statusInterval);
       clearInterval(frameInterval);
       disconnectRealtimeSocket();
     };
-  }, [proctorEnabled, testId, attemptId, capturePreviewFrame, handleProctorViolationUI]);
+  }, [proctorEnabled, testId, attemptId, capturePreviewFrame, handleProctorViolationUI, handleRemoteTermination]);
 
   useEffect(() => {
     if (!startTime || !duration) { navigate('/test/login'); return; }
@@ -639,12 +663,28 @@ export default function TestInterface() {
   // one still genuinely in progress, so it can be auto-submitted well before the full test
   // duration elapses. Runs regardless of tab visibility — background timers still fire
   // (Chrome throttles to ~once/min when hidden), comfortably inside the server's grace window.
+  //
+  // Doubles as the fallback that notices an admin force-submit/ban when proctoring is off
+  // for this test (so the 'attempt-terminated' socket event above never fires) — worst case
+  // ~15s to notice, vs. instant when proctoring is on.
   useEffect(() => {
     if (isSubmitted) return;
-    candidateApi.heartbeat().catch(() => {});
-    const interval = setInterval(() => { candidateApi.heartbeat().catch(() => {}); }, 15000);
+    const checkHeartbeat = async () => {
+      try {
+        const { data } = await candidateApi.heartbeat();
+        if (data?.status && data.status !== 'in_progress') {
+          handleRemoteTermination(
+            data.banned
+              ? 'Your test has been ended by the proctor due to a policy violation.'
+              : 'Your test has already been submitted.'
+          );
+        }
+      } catch { /* ignore — next tick retries */ }
+    };
+    void checkHeartbeat();
+    const interval = setInterval(checkHeartbeat, 15000);
     return () => clearInterval(interval);
-  }, [isSubmitted]);
+  }, [isSubmitted, handleRemoteTermination]);
 
   useEffect(() => {
     if (!currentQuestion || currentQuestion.type !== 'coding') return;
