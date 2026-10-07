@@ -81,6 +81,7 @@ interface FormState {
   requireIdVerification: boolean;
   autoApproveId: boolean;
   idVerificationAutoApproveThreshold: number;
+  requireRoomCheck: boolean;
   allowAccessCode: boolean;
   assessmentMode: 'SEB' | 'NORMAL_BROWSER';
   /* Test behavior */
@@ -164,6 +165,7 @@ function toFormState(t: Test): FormState {
     requireIdVerification: t.requireIdVerification ?? false,
     autoApproveId:         t.autoApproveId ?? false,
     idVerificationAutoApproveThreshold: t.idVerificationAutoApproveThreshold ?? 75,
+    requireRoomCheck:      t.requireRoomCheck ?? false,
     allowAccessCode:       booleanSetting(ext, settings, 'allowAccessCode', false),
     assessmentMode:        t.assessmentMode === 'NORMAL_BROWSER' ? 'NORMAL_BROWSER' : 'SEB',
     shuffleQuestions:      t.shuffleQuestions ?? false,
@@ -455,6 +457,7 @@ const insertEmailToken = (token: string) => {
         requireIdVerification: form.requireIdVerification,
         autoApproveId:         form.autoApproveId,
         idVerificationAutoApproveThreshold: form.idVerificationAutoApproveThreshold,
+        requireRoomCheck:      form.requireRoomCheck,
         allowAccessCode:       form.allowAccessCode,
         assessmentMode:        form.assessmentMode,
         shuffleQuestions:      form.shuffleQuestions,
@@ -687,6 +690,7 @@ const insertEmailToken = (token: string) => {
                 <ToggleRow label="Require invitation link"    desc="Only invited emails can start"          on={form.requireInvitationLink} onChange={() => patch({ requireInvitationLink: !form.requireInvitationLink })} />
                 <ToggleRow label="Limit to one attempt"       desc="Candidate can take the test once"       on={form.limitToOneAttempt}     onChange={() => patch({ limitToOneAttempt: !form.limitToOneAttempt })} />
                 <ToggleRow label="Require ID verification"    desc="Photo ID check before start"            on={form.requireIdVerification} onChange={() => patch({ requireIdVerification: !form.requireIdVerification })} />
+                <ToggleRow label="Check-In process"            desc="Verify face visibility & room lighting before start" on={form.requireRoomCheck} onChange={() => patch({ requireRoomCheck: !form.requireRoomCheck })} />
 
                 {form.requireIdVerification && (
                   <div style={{

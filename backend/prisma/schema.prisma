@@ -240,6 +240,11 @@ model Test {
   // below auto-verifies the candidate instead of routing to the admin queue.
   autoApproveId          Boolean @default(false)
   idVerificationAutoApproveThreshold Float?
+  // Check-in process: a Pearson-style room check before the exam starts — verifies
+  // the candidate's face is visible and the room is well-lit, via a webcam frame
+  // captured during environment-setup (client-side MediaPipe face detection +
+  // brightness sampling, see clientRoomCheckService.ts).
+  requireRoomCheck      Boolean @default(false)
   allowMobileProctoring Boolean @default(false)
   customAIViolations    String? // JSON array of enabled proctoring violation event types
   assessmentMode       String  @default("SEB") // SEB | NORMAL_BROWSER

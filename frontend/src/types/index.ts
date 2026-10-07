@@ -36,6 +36,7 @@ export interface Test {
   requireIdVerification?: boolean;
   autoApproveId?: boolean;
   idVerificationAutoApproveThreshold?: number;
+  requireRoomCheck?: boolean;
   customAIViolations?: string[];
   assessmentMode?: 'SEB' | 'NORMAL_BROWSER';
   proctoringSettings?: Record<string, unknown>;

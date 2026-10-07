@@ -59,6 +59,7 @@ export const createTestValidation: ValidationChain[] = [
   body('requireMicrophone').optional().isBoolean().withMessage('Require microphone must be boolean'),
   body('requireScreenShare').optional().isBoolean().withMessage('Require screen share must be boolean'),
   body('requireIdVerification').optional().isBoolean().withMessage('Require ID verification must be boolean'),
+  body('requireRoomCheck').optional().isBoolean().withMessage('Require room check must be boolean'),
   body('customAIViolations').optional().isArray().withMessage('customAIViolations must be an array'),
   body('customAIViolations.*').optional().isString().withMessage('Each customAIViolations value must be a string'),
   body('assessmentMode').optional().isIn(['SEB', 'NORMAL_BROWSER']).withMessage('Assessment mode must be SEB or NORMAL_BROWSER'),
@@ -80,6 +81,7 @@ export const updateTestValidation: ValidationChain[] = [
   body('requireMicrophone').optional().isBoolean(),
   body('requireScreenShare').optional().isBoolean(),
   body('requireIdVerification').optional().isBoolean(),
+  body('requireRoomCheck').optional().isBoolean(),
   body('customAIViolations').optional().isArray(),
   body('customAIViolations.*').optional().isString(),
   body('assessmentMode').optional().isIn(['SEB', 'NORMAL_BROWSER'])

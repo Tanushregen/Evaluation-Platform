@@ -30,7 +30,8 @@ const MAX_WAIT_MS = 60000;
  * is always 'server' for NORMAL_BROWSER tests), so there's nothing
  * per-candidate to warm up here — this just polls whether the shared
  * python_cv_service backend is up (mostly useful for catching it being
- * down/mid-deploy), capped at 60s, before moving on to ID Verification.
+ * down/mid-deploy), capped at 60s, before moving on to the Check-In/Room
+ * Check step and then ID Verification.
  * Diagnostic only — the exam runs the same either way, there's no
  * client-side fallback to switch to.
  */
@@ -90,7 +91,7 @@ export default function NormalBrowserEnvironmentSetup() {
       }
 
       setReady(true);
-      window.setTimeout(() => navigate('/test/id-verification'), 500);
+      window.setTimeout(() => navigate('/test/room-check'), 500);
     })();
   }, [navigate]);
 

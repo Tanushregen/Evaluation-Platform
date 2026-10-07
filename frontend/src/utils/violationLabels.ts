@@ -16,6 +16,8 @@ const VIOLATION_LABELS: Record<string, string> = {
   suspicious_audio: 'Suspicious Audio',
   auto_submit: 'Auto-Submitted',
   manual_submit: 'Test Submitted',
+  room_check_passed: 'Check-In Passed',
+  room_check_failed: 'Check-In Failed',
 };
 
 export function violationLabel(eventType: string): string {

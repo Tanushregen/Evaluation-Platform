@@ -47,8 +47,8 @@ function waitForVideoFrame(video: HTMLVideoElement, timeoutMs: number): Promise<
 }
 
 /**
- * Page 2 of the SEB pre-exam flow (System Check → here → ID Verification →
- * Instructions → Start Assessment). Warms up the in-browser proctoring
+ * Page 2 of the SEB pre-exam flow (System Check → here → Check-In/Room Check
+ * → ID Verification → Instructions → Start Assessment). Warms up the in-browser proctoring
  * models AND runs one real inference pass through each against the
  * candidate's own camera feed (clientDetectionReadiness.ts) — that real
  * inference call is what actually pays onnxruntime-web/MediaPipe's
@@ -141,7 +141,7 @@ export default function SebEnvironmentSetup() {
       }
 
       setReady(true);
-      window.setTimeout(() => navigate('/test/id-verification'), 500);
+      window.setTimeout(() => navigate('/test/room-check'), 500);
     })();
   }, [navigate, setForceServerDetection]);
 

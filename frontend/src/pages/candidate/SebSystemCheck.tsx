@@ -19,6 +19,7 @@ interface TestDetails {
     requireCamera: boolean;
     requireMicrophone: boolean;
     requireScreenShare: boolean;
+    requireRoomCheck: boolean;
     hasSpeakingQuestion: boolean;
   };
 }
@@ -190,7 +191,13 @@ export default function SebSystemCheck() {
 
   const handleNext = () => {
     if (!testDetails) return;
-    navigate(testDetails.test.requireCamera ? '/test/environment-setup' : '/test/id-verification');
+    if (testDetails.test.requireCamera) {
+      navigate('/test/environment-setup');
+    } else if (testDetails.test.requireRoomCheck) {
+      navigate('/test/room-check');
+    } else {
+      navigate('/test/id-verification');
+    }
   };
 
   if (loading) {
