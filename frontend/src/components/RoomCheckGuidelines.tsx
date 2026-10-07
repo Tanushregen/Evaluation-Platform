@@ -1,4 +1,5 @@
-import { Sun, Image, UserRound, MonitorOff, X, Check } from 'lucide-react';
+import { Sun, Image, UserRound, MonitorOff } from 'lucide-react';
+import poorVsGoodLighting from '../assets/room-check/poor-vs-good-lighting.png';
 
 const CHECKLIST = [
   { icon: Sun, title: 'Good lighting', desc: 'Your face should be clearly visible' },
@@ -6,22 +7,6 @@ const CHECKLIST = [
   { icon: UserRound, title: 'Be visible from head to mid-waist', desc: 'Sit at a comfortable distance' },
   { icon: MonitorOff, title: 'No other people or devices', desc: 'Ensure you are alone in the room' },
 ];
-
-function ExampleCard({ good }: { good: boolean }) {
-  return (
-    <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: '1 / 1', background: good ? '#F3F4F6' : '#1F2937' }}>
-      <div className="w-full h-full flex items-center justify-center">
-        <UserRound size={34} color={good ? '#9CA3AF' : '#4B5563'} />
-      </div>
-      <div
-        className="absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center"
-        style={{ backgroundColor: good ? '#16A34A' : '#DC2626' }}
-      >
-        {good ? <Check size={12} color="white" /> : <X size={12} color="white" />}
-      </div>
-    </div>
-  );
-}
 
 /** Right-hand guidance panel shown alongside the Room Check video preview. */
 export default function RoomCheckGuidelines() {
@@ -35,18 +20,11 @@ export default function RoomCheckGuidelines() {
         Ensure the following for a smooth assessment experience.
       </p>
 
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div>
-          <ExampleCard good={false} />
-          <p className="text-xs font-semibold mt-2" style={{ color: 'var(--admin-text)' }}>Poor Lighting</p>
-          <p className="text-xs" style={{ color: 'var(--admin-text-muted)' }}>Avoid dim or backlit rooms.</p>
-        </div>
-        <div>
-          <ExampleCard good />
-          <p className="text-xs font-semibold mt-2" style={{ color: 'var(--admin-text)' }}>Good Lighting</p>
-          <p className="text-xs" style={{ color: 'var(--admin-text-muted)' }}>Sit in a well-lit area facing a light source.</p>
-        </div>
-      </div>
+      <img
+        src={poorVsGoodLighting}
+        alt="Poor lighting: avoid dim or backlit rooms. Good lighting: sit in a well-lit area facing a light source."
+        className="w-full rounded-xl mb-4"
+      />
 
       <div className="space-y-3 pt-3" style={{ borderTop: '1px solid var(--admin-border)' }}>
         {CHECKLIST.map(({ icon: Icon, title, desc }) => (
