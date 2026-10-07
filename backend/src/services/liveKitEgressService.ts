@@ -5,6 +5,7 @@ import {
   EgressClient,
   EncodedFileOutput,
   EncodedFileType,
+  EncodingOptions,
   S3Upload,
   WebhookConfig,
   WebhookReceiver,
@@ -39,6 +40,20 @@ type EgressInfoLike = {
 function enabled(): boolean {
   return (process.env.LIVEKIT_EGRESS_ENABLED || 'false').toLowerCase() === 'true';
 }
+
+// Egress defaults to 1920x1080 @ 4500kbps video / 128kbps audio — built for a
+// shareable meeting recording, not a proctoring webcam feed of someone sitting
+// still at a desk. These are evidence recordings reviewed at normal speed to
+// check a candidate's face/surroundings, not graded on visual fidelity, so a
+// much lower bitrate/resolution/framerate costs essentially nothing in
+// usefulness while cutting B2 storage (and egress bandwidth) by roughly 4-5x.
+const PROCTORING_RECORDING_ENCODING = new EncodingOptions({
+  width: 960,
+  height: 540,
+  framerate: 15,
+  videoBitrate: 1000,
+  audioBitrate: 64,
+});
 
 export function getRecordingRoot(): string {
   return path.resolve(process.env.RECORDING_DIR || '/var/lib/talentstaq/recordings');
@@ -266,7 +281,7 @@ async function startParticipantEgressWithRetry(
         roomName,
         participantIdentity,
         { file: output },
-        { screenShare: false, webhooks },
+        { screenShare: false, webhooks, encodingOptions: PROCTORING_RECORDING_ENCODING },
       );
     } catch (error) {
       lastError = error;
