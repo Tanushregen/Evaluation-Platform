@@ -39,6 +39,7 @@ import TestInvitation from './pages/candidate/TestInvitation';
 import TestInstructions from './pages/candidate/TestInstructions';
 import SystemCheck from './pages/candidate/SystemCheck';
 import EnvironmentSetup from './pages/candidate/EnvironmentSetup';
+import RoomCheck from './pages/candidate/RoomCheck';
 import IdVerification from './pages/candidate/IdVerification';
 import TestInterface from './pages/candidate/TestInterface';
 import TestComplete from './pages/candidate/TestComplete';
@@ -159,6 +160,14 @@ export default function App() {
         element={
           <ProtectedCandidateRoute>
             <EnvironmentSetup />
+          </ProtectedCandidateRoute>
+        }
+      />
+      <Route
+        path="/test/room-check"
+        element={
+          <ProtectedCandidateRoute>
+            <RoomCheck />
           </ProtectedCandidateRoute>
         }
       />

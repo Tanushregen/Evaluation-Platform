@@ -604,6 +604,7 @@ export async function getTestDetails(req: AuthenticatedRequest, res: Response): 
           shuffleOptions: true,
           maxViolations: true,
           assessmentMode: true,
+          requireRoomCheck: true,
         }
       }),
       prisma.testAttempt.findUnique({

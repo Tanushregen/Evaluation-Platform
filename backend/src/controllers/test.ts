@@ -738,6 +738,7 @@ export async function updateTest(req: AuthenticatedRequest, res: Response): Prom
     if (updates.requireMicrophone !== undefined) sanitizedUpdates.requireMicrophone = updates.requireMicrophone;
     if (updates.requireScreenShare !== undefined) sanitizedUpdates.requireScreenShare = updates.requireScreenShare;
     if (updates.requireIdVerification !== undefined) sanitizedUpdates.requireIdVerification = updates.requireIdVerification;
+    if (updates.requireRoomCheck !== undefined) sanitizedUpdates.requireRoomCheck = updates.requireRoomCheck;
     if (updates.autoApproveId !== undefined) sanitizedUpdates.autoApproveId = updates.autoApproveId;
     if (updates.idVerificationAutoApproveThreshold !== undefined) {
       const parsedThreshold = Number(updates.idVerificationAutoApproveThreshold);
